@@ -1,0 +1,1831 @@
+<?xml version="1.0" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg version="1.1" width="1200" height="414" onload="init(evt)" viewBox="0 0 1200 414" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<!-- Flame graph stack visualization. See https://github.com/brendangregg/FlameGraph for latest version, and http://www.brendangregg.com/flamegraphs.html for examples. -->
+<!-- NOTES:  -->
+<defs>
+	<linearGradient id="background" y1="0" y2="1" x1="0" x2="0" >
+		<stop stop-color="#eeeeee" offset="5%" />
+		<stop stop-color="#eeeeb0" offset="95%" />
+	</linearGradient>
+</defs>
+<style type="text/css">
+	text { font-family:Verdana; font-size:12px; fill:rgb(0,0,0); }
+	#search, #ignorecase { opacity:0.1; cursor:pointer; }
+	#search:hover, #search.show, #ignorecase:hover, #ignorecase.show { opacity:1; }
+	#subtitle { text-anchor:middle; font-color:rgb(160,160,160); }
+	#title { text-anchor:middle; font-size:17px}
+	#unzoom { cursor:pointer; }
+	#frames > *:hover { stroke:black; stroke-width:0.5; cursor:pointer; }
+	.hide { display:none; }
+	.parent { opacity:0.5; }
+</style>
+<script type="text/ecmascript">
+<![CDATA[
+	"use strict";
+	var details, searchbtn, unzoombtn, matchedtxt, svg, searching, currentSearchTerm, ignorecase, ignorecaseBtn;
+	function init(evt) {
+		details = document.getElementById("details").firstChild;
+		searchbtn = document.getElementById("search");
+		ignorecaseBtn = document.getElementById("ignorecase");
+		unzoombtn = document.getElementById("unzoom");
+		matchedtxt = document.getElementById("matched");
+		svg = document.getElementsByTagName("svg")[0];
+		searching = 0;
+		currentSearchTerm = null;
+
+		// use GET parameters to restore a flamegraphs state.
+		var params = get_params();
+		if (params.x && params.y)
+			zoom(find_group(document.querySelector('[x="' + params.x + '"][y="' + params.y + '"]')));
+                if (params.s) search(params.s);
+	}
+
+	// event listeners
+	window.addEventListener("click", function(e) {
+		var target = find_group(e.target);
+		if (target) {
+			if (target.nodeName == "a") {
+				if (e.ctrlKey === false) return;
+				e.preventDefault();
+			}
+			if (target.classList.contains("parent")) unzoom(true);
+			zoom(target);
+			if (!document.querySelector('.parent')) {
+				// we have basically done a clearzoom so clear the url
+				var params = get_params();
+				if (params.x) delete params.x;
+				if (params.y) delete params.y;
+				history.replaceState(null, null, parse_params(params));
+				unzoombtn.classList.add("hide");
+				return;
+			}
+
+			// set parameters for zoom state
+			var el = target.querySelector("rect");
+			if (el && el.attributes && el.attributes.y && el.attributes._orig_x) {
+				var params = get_params()
+				params.x = el.attributes._orig_x.value;
+				params.y = el.attributes.y.value;
+				history.replaceState(null, null, parse_params(params));
+			}
+		}
+		else if (e.target.id == "unzoom") clearzoom();
+		else if (e.target.id == "search") search_prompt();
+		else if (e.target.id == "ignorecase") toggle_ignorecase();
+	}, false)
+
+	// mouse-over for info
+	// show
+	window.addEventListener("mouseover", function(e) {
+		var target = find_group(e.target);
+		if (target) details.nodeValue = "Function: " + g_to_text(target);
+	}, false)
+
+	// clear
+	window.addEventListener("mouseout", function(e) {
+		var target = find_group(e.target);
+		if (target) details.nodeValue = ' ';
+	}, false)
+
+	// ctrl-F for search
+	// ctrl-I to toggle case-sensitive search
+	window.addEventListener("keydown",function (e) {
+		if (e.keyCode === 114 || (e.ctrlKey && e.keyCode === 70)) {
+			e.preventDefault();
+			search_prompt();
+		}
+		else if (e.ctrlKey && e.keyCode === 73) {
+			e.preventDefault();
+			toggle_ignorecase();
+		}
+	}, false)
+
+	// functions
+	function get_params() {
+		var params = {};
+		var paramsarr = window.location.search.substr(1).split('&');
+		for (var i = 0; i < paramsarr.length; ++i) {
+			var tmp = paramsarr[i].split("=");
+			if (!tmp[0] || !tmp[1]) continue;
+			params[tmp[0]]  = decodeURIComponent(tmp[1]);
+		}
+		return params;
+	}
+	function parse_params(params) {
+		var uri = "?";
+		for (var key in params) {
+			uri += key + '=' + encodeURIComponent(params[key]) + '&';
+		}
+		if (uri.slice(-1) == "&")
+			uri = uri.substring(0, uri.length - 1);
+		if (uri == '?')
+			uri = window.location.href.split('?')[0];
+		return uri;
+	}
+	function find_child(node, selector) {
+		var children = node.querySelectorAll(selector);
+		if (children.length) return children[0];
+	}
+	function find_group(node) {
+		var parent = node.parentElement;
+		if (!parent) return;
+		if (parent.id == "frames") return node;
+		return find_group(parent);
+	}
+	function orig_save(e, attr, val) {
+		if (e.attributes["_orig_" + attr] != undefined) return;
+		if (e.attributes[attr] == undefined) return;
+		if (val == undefined) val = e.attributes[attr].value;
+		e.setAttribute("_orig_" + attr, val);
+	}
+	function orig_load(e, attr) {
+		if (e.attributes["_orig_"+attr] == undefined) return;
+		e.attributes[attr].value = e.attributes["_orig_" + attr].value;
+		e.removeAttribute("_orig_"+attr);
+	}
+	function g_to_text(e) {
+		var text = find_child(e, "title").firstChild.nodeValue;
+		return (text)
+	}
+	function g_to_func(e) {
+		var func = g_to_text(e);
+		// if there's any manipulation we want to do to the function
+		// name before it's searched, do it here before returning.
+		return (func);
+	}
+	function update_text(e) {
+		var r = find_child(e, "rect");
+		var t = find_child(e, "text");
+		var w = parseFloat(r.attributes.width.value) -3;
+		var txt = find_child(e, "title").textContent.replace(/\([^(]*\)$/,"");
+		t.attributes.x.value = parseFloat(r.attributes.x.value) + 3;
+
+		// Smaller than this size won't fit anything
+		if (w < 2 * 12 * 0.59) {
+			t.textContent = "";
+			return;
+		}
+
+		t.textContent = txt;
+		var sl = t.getSubStringLength(0, txt.length);
+		// check if only whitespace or if we can fit the entire string into width w
+		if (/^ *$/.test(txt) || sl < w)
+			return;
+
+		// this isn't perfect, but gives a good starting point
+		// and avoids calling getSubStringLength too often
+		var start = Math.floor((w/sl) * txt.length);
+		for (var x = start; x > 0; x = x-2) {
+			if (t.getSubStringLength(0, x + 2) <= w) {
+				t.textContent = txt.substring(0, x) + "..";
+				return;
+			}
+		}
+		t.textContent = "";
+	}
+
+	// zoom
+	function zoom_reset(e) {
+		if (e.attributes != undefined) {
+			orig_load(e, "x");
+			orig_load(e, "width");
+		}
+		if (e.childNodes == undefined) return;
+		for (var i = 0, c = e.childNodes; i < c.length; i++) {
+			zoom_reset(c[i]);
+		}
+	}
+	function zoom_child(e, x, ratio) {
+		if (e.attributes != undefined) {
+			if (e.attributes.x != undefined) {
+				orig_save(e, "x");
+				e.attributes.x.value = (parseFloat(e.attributes.x.value) - x - 10) * ratio + 10;
+				if (e.tagName == "text")
+					e.attributes.x.value = find_child(e.parentNode, "rect[x]").attributes.x.value + 3;
+			}
+			if (e.attributes.width != undefined) {
+				orig_save(e, "width");
+				e.attributes.width.value = parseFloat(e.attributes.width.value) * ratio;
+			}
+		}
+
+		if (e.childNodes == undefined) return;
+		for (var i = 0, c = e.childNodes; i < c.length; i++) {
+			zoom_child(c[i], x - 10, ratio);
+		}
+	}
+	function zoom_parent(e) {
+		if (e.attributes) {
+			if (e.attributes.x != undefined) {
+				orig_save(e, "x");
+				e.attributes.x.value = 10;
+			}
+			if (e.attributes.width != undefined) {
+				orig_save(e, "width");
+				e.attributes.width.value = parseInt(svg.width.baseVal.value) - (10 * 2);
+			}
+		}
+		if (e.childNodes == undefined) return;
+		for (var i = 0, c = e.childNodes; i < c.length; i++) {
+			zoom_parent(c[i]);
+		}
+	}
+	function zoom(node) {
+		var attr = find_child(node, "rect").attributes;
+		var width = parseFloat(attr.width.value);
+		var xmin = parseFloat(attr.x.value);
+		var xmax = parseFloat(xmin + width);
+		var ymin = parseFloat(attr.y.value);
+		var ratio = (svg.width.baseVal.value - 2 * 10) / width;
+
+		// XXX: Workaround for JavaScript float issues (fix me)
+		var fudge = 0.0001;
+
+		unzoombtn.classList.remove("hide");
+
+		var el = document.getElementById("frames").children;
+		for (var i = 0; i < el.length; i++) {
+			var e = el[i];
+			var a = find_child(e, "rect").attributes;
+			var ex = parseFloat(a.x.value);
+			var ew = parseFloat(a.width.value);
+			var upstack;
+			// Is it an ancestor
+			if (0 == 0) {
+				upstack = parseFloat(a.y.value) > ymin;
+			} else {
+				upstack = parseFloat(a.y.value) < ymin;
+			}
+			if (upstack) {
+				// Direct ancestor
+				if (ex <= xmin && (ex+ew+fudge) >= xmax) {
+					e.classList.add("parent");
+					zoom_parent(e);
+					update_text(e);
+				}
+				// not in current path
+				else
+					e.classList.add("hide");
+			}
+			// Children maybe
+			else {
+				// no common path
+				if (ex < xmin || ex + fudge >= xmax) {
+					e.classList.add("hide");
+				}
+				else {
+					zoom_child(e, xmin, ratio);
+					update_text(e);
+				}
+			}
+		}
+		search();
+	}
+	function unzoom(dont_update_text) {
+		unzoombtn.classList.add("hide");
+		var el = document.getElementById("frames").children;
+		for(var i = 0; i < el.length; i++) {
+			el[i].classList.remove("parent");
+			el[i].classList.remove("hide");
+			zoom_reset(el[i]);
+			if(!dont_update_text) update_text(el[i]);
+		}
+		search();
+	}
+	function clearzoom() {
+		unzoom();
+
+		// remove zoom state
+		var params = get_params();
+		if (params.x) delete params.x;
+		if (params.y) delete params.y;
+		history.replaceState(null, null, parse_params(params));
+	}
+
+	// search
+	function toggle_ignorecase() {
+		ignorecase = !ignorecase;
+		if (ignorecase) {
+			ignorecaseBtn.classList.add("show");
+		} else {
+			ignorecaseBtn.classList.remove("show");
+		}
+		reset_search();
+		search();
+	}
+	function reset_search() {
+		var el = document.querySelectorAll("#frames rect");
+		for (var i = 0; i < el.length; i++) {
+			orig_load(el[i], "fill")
+		}
+		var params = get_params();
+		delete params.s;
+		history.replaceState(null, null, parse_params(params));
+	}
+	function search_prompt() {
+		if (!searching) {
+			var term = prompt("Enter a search term (regexp " +
+			    "allowed, eg: ^ext4_)"
+			    + (ignorecase ? ", ignoring case" : "")
+			    + "\nPress Ctrl-i to toggle case sensitivity", "");
+			if (term != null) search(term);
+		} else {
+			reset_search();
+			searching = 0;
+			currentSearchTerm = null;
+			searchbtn.classList.remove("show");
+			searchbtn.firstChild.nodeValue = "Search"
+			matchedtxt.classList.add("hide");
+			matchedtxt.firstChild.nodeValue = ""
+		}
+	}
+	function search(term) {
+		if (term) currentSearchTerm = term;
+		if (currentSearchTerm === null) return;
+
+		var re = new RegExp(currentSearchTerm, ignorecase ? 'i' : '');
+		var el = document.getElementById("frames").children;
+		var matches = new Object();
+		var maxwidth = 0;
+		for (var i = 0; i < el.length; i++) {
+			var e = el[i];
+			var func = g_to_func(e);
+			var rect = find_child(e, "rect");
+			if (func == null || rect == null)
+				continue;
+
+			// Save max width. Only works as we have a root frame
+			var w = parseFloat(rect.attributes.width.value);
+			if (w > maxwidth)
+				maxwidth = w;
+
+			if (func.match(re)) {
+				// highlight
+				var x = parseFloat(rect.attributes.x.value);
+				orig_save(rect, "fill");
+				rect.attributes.fill.value = "rgb(230,0,230)";
+
+				// remember matches
+				if (matches[x] == undefined) {
+					matches[x] = w;
+				} else {
+					if (w > matches[x]) {
+						// overwrite with parent
+						matches[x] = w;
+					}
+				}
+				searching = 1;
+			}
+		}
+		if (!searching)
+			return;
+		var params = get_params();
+		params.s = currentSearchTerm;
+		history.replaceState(null, null, parse_params(params));
+
+		searchbtn.classList.add("show");
+		searchbtn.firstChild.nodeValue = "Reset Search";
+
+		// calculate percent matched, excluding vertical overlap
+		var count = 0;
+		var lastx = -1;
+		var lastw = 0;
+		var keys = Array();
+		for (k in matches) {
+			if (matches.hasOwnProperty(k))
+				keys.push(k);
+		}
+		// sort the matched frames by their x location
+		// ascending, then width descending
+		keys.sort(function(a, b){
+			return a - b;
+		});
+		// Step through frames saving only the biggest bottom-up frames
+		// thanks to the sort order. This relies on the tree property
+		// where children are always smaller than their parents.
+		var fudge = 0.0001;	// JavaScript floating point
+		for (var k in keys) {
+			var x = parseFloat(keys[k]);
+			var w = matches[keys[k]];
+			if (x >= lastx + lastw - fudge) {
+				count += w;
+				lastx = x;
+				lastw = w;
+			}
+		}
+		// display matched percent
+		matchedtxt.classList.remove("hide");
+		var pct = 100 * count / maxwidth;
+		if (pct != 100) pct = pct.toFixed(1)
+		matchedtxt.firstChild.nodeValue = "Matched: " + pct + "%";
+	}
+]]>
+</script>
+<rect x="0.0" y="0" width="1200.0" height="414.0" fill="url(#background)"  />
+<text id="title" x="600.00" y="24" >Before optimization (linear scan)</text>
+<text id="subtitle" x="600.00" y="48" >profile.conf, 4000 ticks, ~68% of CPU in find_relationship</text>
+<text id="details" x="10.00" y="397" > </text>
+<text id="unzoom" x="10.00" y="24" class="hide">Reset Zoom</text>
+<text id="search" x="1090.00" y="24" >Search</text>
+<text id="ignorecase" x="1174.00" y="24" >ic</text>
+<text id="matched" x="1090.00" y="397" > </text>
+<g id="frames">
+<g >
+<title>__memset_avx512_unaligned (10,324,404 samples, 0.15%)</title><rect x="1054.0" y="253" width="1.8" height="15.0" fill="rgb(214,41,9)" rx="2" ry="2" />
+<text  x="1057.04" y="263.5" ></text>
+</g>
+<g >
+<title>flecs_query_self_change_detection (1,470,859 samples, 0.02%)</title><rect x="1189.0" y="285" width="0.3" height="15.0" fill="rgb(247,196,47)" rx="2" ry="2" />
+<text  x="1192.00" y="295.5" ></text>
+</g>
+<g >
+<title>flecs_stage_from_world (977,413 samples, 0.01%)</title><rect x="50.5" y="109" width="0.2" height="15.0" fill="rgb(212,32,7)" rx="2" ry="2" />
+<text  x="53.51" y="119.5" ></text>
+</g>
+<g >
+<title>ecs_delete (1,412,238 samples, 0.02%)</title><rect x="16.1" y="221" width="0.3" height="15.0" fill="rgb(214,44,10)" rx="2" ry="2" />
+<text  x="19.13" y="231.5" ></text>
+</g>
+<g >
+<title>__memset_avx512_unaligned_erms (985,467 samples, 0.01%)</title><rect x="61.6" y="157" width="0.2" height="15.0" fill="rgb(214,43,10)" rx="2" ry="2" />
+<text  x="64.61" y="167.5" ></text>
+</g>
+<g >
+<title>flecs_query_iter (15,393,704 samples, 0.22%)</title><rect x="49.2" y="141" width="2.6" height="15.0" fill="rgb(221,77,18)" rx="2" ry="2" />
+<text  x="52.23" y="151.5" ></text>
+</g>
+<g >
+<title>flecs_workers_progress (11,985,668 samples, 0.17%)</title><rect x="70.0" y="301" width="2.1" height="15.0" fill="rgb(232,126,30)" rx="2" ry="2" />
+<text  x="73.05" y="311.5" ></text>
+</g>
+<g >
+<title>__vfprintf_internal (1,462,742 samples, 0.02%)</title><rect x="71.3" y="205" width="0.3" height="15.0" fill="rgb(232,125,30)" rx="2" ry="2" />
+<text  x="74.30" y="215.5" ></text>
+</g>
+<g >
+<title>msort_with_tmp.part.0 (3,510,812 samples, 0.05%)</title><rect x="15.1" y="93" width="0.6" height="15.0" fill="rgb(250,211,50)" rx="2" ry="2" />
+<text  x="18.12" y="103.5" ></text>
+</g>
+<g >
+<title>__printf_fp_l_buffer (21,564,821 samples, 0.31%)</title><rect x="11.4" y="157" width="3.6" height="15.0" fill="rgb(212,33,8)" rx="2" ry="2" />
+<text  x="14.36" y="167.5" ></text>
+</g>
+<g >
+<title>flecs_get_base_component (45,985,808 samples, 0.66%)</title><rect x="138.8" y="301" width="7.8" height="15.0" fill="rgb(234,136,32)" rx="2" ry="2" />
+<text  x="141.76" y="311.5" ></text>
+</g>
+<g >
+<title>flecs_poly_is_ (977,640 samples, 0.01%)</title><rect x="148.3" y="253" width="0.2" height="15.0" fill="rgb(239,160,38)" rx="2" ry="2" />
+<text  x="151.34" y="263.5" ></text>
+</g>
+<g >
+<title>__vfprintf_internal (38,705,682 samples, 0.56%)</title><rect x="54.0" y="157" width="6.6" height="15.0" fill="rgb(232,125,30)" rx="2" ry="2" />
+<text  x="57.01" y="167.5" ></text>
+</g>
+<g >
+<title>flecs_stack_alloc (4,426,430 samples, 0.06%)</title><rect x="149.0" y="253" width="0.8" height="15.0" fill="rgb(216,53,12)" rx="2" ry="2" />
+<text  x="152.01" y="263.5" ></text>
+</g>
+<g >
+<title>flecs_entity_index_get (1,473,651 samples, 0.02%)</title><rect x="30.6" y="157" width="0.3" height="15.0" fill="rgb(229,113,27)" rx="2" ry="2" />
+<text  x="33.62" y="167.5" ></text>
+</g>
+<g >
+<title>flecs_actions_on_remove_intern_w_reparent (924,419 samples, 0.01%)</title><rect x="16.1" y="189" width="0.2" height="15.0" fill="rgb(229,110,26)" rx="2" ry="2" />
+<text  x="19.13" y="199.5" ></text>
+</g>
+<g >
+<title>flecs_query_iter_run_ctx_init (1,973,343 samples, 0.03%)</title><rect x="1122.1" y="253" width="0.3" height="15.0" fill="rgb(247,195,46)" rx="2" ry="2" />
+<text  x="1125.08" y="263.5" ></text>
+</g>
+<g >
+<title>flecs_run_system (251,168,735 samples, 3.63%)</title><rect x="19.5" y="205" width="42.8" height="15.0" fill="rgb(218,62,14)" rx="2" ry="2" />
+<text  x="22.50" y="215.5" >flec..</text>
+</g>
+<g >
+<title>flecs_cmd_new (1,456,301 samples, 0.02%)</title><rect x="32.8" y="125" width="0.2" height="15.0" fill="rgb(223,84,20)" rx="2" ry="2" />
+<text  x="35.80" y="135.5" ></text>
+</g>
+<g >
+<title>ecs_vec_count (986,603 samples, 0.01%)</title><rect x="33.5" y="93" width="0.1" height="15.0" fill="rgb(224,90,21)" rx="2" ry="2" />
+<text  x="36.47" y="103.5" ></text>
+</g>
+<g >
+<title>ecs_table_entities (985,573 samples, 0.01%)</title><rect x="1149.5" y="269" width="0.1" height="15.0" fill="rgb(228,108,25)" rx="2" ry="2" />
+<text  x="1152.46" y="279.5" ></text>
+</g>
+<g >
+<title>ecs_get_id (8,674,874 samples, 0.13%)</title><rect x="29.6" y="173" width="1.5" height="15.0" fill="rgb(209,22,5)" rx="2" ry="2" />
+<text  x="32.65" y="183.5" ></text>
+</g>
+<g >
+<title>flecs_table_cache_next_ (1,478,923 samples, 0.02%)</title><rect x="53.2" y="125" width="0.2" height="15.0" fill="rgb(240,164,39)" rx="2" ry="2" />
+<text  x="56.18" y="135.5" ></text>
+</g>
+<g >
+<title>flecs_table_ensure (717,640 samples, 0.01%)</title><rect x="68.9" y="221" width="0.1" height="15.0" fill="rgb(234,137,32)" rx="2" ry="2" />
+<text  x="71.90" y="231.5" ></text>
+</g>
+<g >
+<title>flecs_query_check_table_monitor (6,346,925 samples, 0.09%)</title><rect x="18.2" y="125" width="1.1" height="15.0" fill="rgb(244,181,43)" rx="2" ry="2" />
+<text  x="21.25" y="135.5" ></text>
+</g>
+<g >
+<title>flecs_table_traverse_add (717,640 samples, 0.01%)</title><rect x="68.9" y="269" width="0.1" height="15.0" fill="rgb(244,181,43)" rx="2" ry="2" />
+<text  x="71.90" y="279.5" ></text>
+</g>
+<g >
+<title>main (5,472,928 samples, 0.08%)</title><rect x="15.1" y="301" width="1.0" height="15.0" fill="rgb(243,179,42)" rx="2" ry="2" />
+<text  x="18.12" y="311.5" ></text>
+</g>
+<g >
+<title>ecs_query_iter (11,794,172 samples, 0.17%)</title><rect x="17.3" y="189" width="2.0" height="15.0" fill="rgb(228,108,25)" rx="2" ry="2" />
+<text  x="20.32" y="199.5" ></text>
+</g>
+<g >
+<title>flecs_query_cache_iter_init (10,322,139 samples, 0.15%)</title><rect x="17.6" y="157" width="1.7" height="15.0" fill="rgb(248,198,47)" rx="2" ry="2" />
+<text  x="20.57" y="167.5" ></text>
+</g>
+<g >
+<title>ecs_query_init (717,640 samples, 0.01%)</title><rect x="68.9" y="333" width="0.1" height="15.0" fill="rgb(228,108,25)" rx="2" ry="2" />
+<text  x="71.90" y="343.5" ></text>
+</g>
+<g >
+<title>flecs_defer_ensure (978,849 samples, 0.01%)</title><rect x="23.3" y="157" width="0.1" height="15.0" fill="rgb(247,197,47)" rx="2" ry="2" />
+<text  x="26.27" y="167.5" ></text>
+</g>
+<g >
+<title>flecs_poly_is_ (981,535 samples, 0.01%)</title><rect x="1115.2" y="269" width="0.2" height="15.0" fill="rgb(239,160,38)" rx="2" ry="2" />
+<text  x="1118.21" y="279.5" ></text>
+</g>
+<g >
+<title>flecs_stack_alloc (2,467,092 samples, 0.04%)</title><rect x="149.8" y="253" width="0.4" height="15.0" fill="rgb(216,53,12)" rx="2" ry="2" />
+<text  x="152.76" y="263.5" ></text>
+</g>
+<g >
+<title>normalize_pair (3,408,358 samples, 0.05%)</title><rect x="1189.3" y="301" width="0.5" height="15.0" fill="rgb(223,86,20)" rx="2" ry="2" />
+<text  x="1192.25" y="311.5" ></text>
+</g>
+<g >
+<title>flecs_workers_progress (303,162,711 samples, 4.38%)</title><rect x="17.2" y="253" width="51.6" height="15.0" fill="rgb(232,126,30)" rx="2" ry="2" />
+<text  x="20.15" y="263.5" >flecs..</text>
+</g>
+<g >
+<title>__printf_fp_buffer_1.isra.0 (1,962,116 samples, 0.03%)</title><rect x="15.7" y="125" width="0.4" height="15.0" fill="rgb(254,229,54)" rx="2" ry="2" />
+<text  x="18.72" y="135.5" ></text>
+</g>
+<g >
+<title>flecs_create_edge_for_add (717,640 samples, 0.01%)</title><rect x="68.9" y="253" width="0.1" height="15.0" fill="rgb(213,38,9)" rx="2" ry="2" />
+<text  x="71.90" y="263.5" ></text>
+</g>
+<g >
+<title>flecs_query_trivial_search_init.part.0 (5,399,696 samples, 0.08%)</title><rect x="151.6" y="269" width="0.9" height="15.0" fill="rgb(205,2,0)" rx="2" ry="2" />
+<text  x="154.61" y="279.5" ></text>
+</g>
+<g >
+<title>msort_with_tmp.part.0 (3,442,333 samples, 0.05%)</title><rect x="10.8" y="93" width="0.6" height="15.0" fill="rgb(250,211,50)" rx="2" ry="2" />
+<text  x="13.78" y="103.5" ></text>
+</g>
+<g >
+<title>flecs_entity_index_get (985,772 samples, 0.01%)</title><rect x="34.0" y="141" width="0.1" height="15.0" fill="rgb(229,113,27)" rx="2" ry="2" />
+<text  x="36.97" y="151.5" ></text>
+</g>
+<g >
+<title>flecs_iter_calloc (1,472,033 samples, 0.02%)</title><rect x="17.3" y="157" width="0.3" height="15.0" fill="rgb(210,23,5)" rx="2" ry="2" />
+<text  x="20.32" y="167.5" ></text>
+</g>
+<g >
+<title>flecs_insert_sleep (976,519 samples, 0.01%)</title><rect x="16.7" y="221" width="0.2" height="15.0" fill="rgb(205,3,0)" rx="2" ry="2" />
+<text  x="19.74" y="231.5" ></text>
+</g>
+<g >
+<title>flecs_stage_from_world (43,253,142 samples, 0.62%)</title><rect x="1076.4" y="253" width="7.4" height="15.0" fill="rgb(212,32,7)" rx="2" ry="2" />
+<text  x="1079.41" y="263.5" ></text>
+</g>
+<g >
+<title>rng_float (980,415 samples, 0.01%)</title><rect x="1189.8" y="317" width="0.2" height="15.0" fill="rgb(237,151,36)" rx="2" ry="2" />
+<text  x="1192.83" y="327.5" ></text>
+</g>
+<g >
+<title>flecs_stage_from_world (15,240,994 samples, 0.22%)</title><rect x="1112.6" y="253" width="2.6" height="15.0" fill="rgb(212,32,7)" rx="2" ry="2" />
+<text  x="1115.61" y="263.5" ></text>
+</g>
+<g >
+<title>flecs_stack_alloc (1,473,024 samples, 0.02%)</title><rect x="51.0" y="93" width="0.3" height="15.0" fill="rgb(216,53,12)" rx="2" ry="2" />
+<text  x="54.01" y="103.5" ></text>
+</g>
+<g >
+<title>flecs_query_change_detection (54,940,538 samples, 0.79%)</title><rect x="995.8" y="253" width="9.4" height="15.0" fill="rgb(213,38,9)" rx="2" ry="2" />
+<text  x="998.80" y="263.5" ></text>
+</g>
+<g >
+<title>ecs_frame_end (971,239 samples, 0.01%)</title><rect x="16.9" y="253" width="0.2" height="15.0" fill="rgb(213,40,9)" rx="2" ry="2" />
+<text  x="19.90" y="263.5" ></text>
+</g>
+<g >
+<title>flecs_table_dtor_all (923,863 samples, 0.01%)</title><rect x="16.5" y="189" width="0.1" height="15.0" fill="rgb(251,212,50)" rx="2" ry="2" />
+<text  x="19.46" y="199.5" ></text>
+</g>
+<g >
+<title>flecs_defer_set (1,469,219 samples, 0.02%)</title><rect x="28.8" y="141" width="0.3" height="15.0" fill="rgb(253,224,53)" rx="2" ry="2" />
+<text  x="31.81" y="151.5" ></text>
+</g>
+<g >
+<title>__printf_fp_l_buffer (3,926,489 samples, 0.06%)</title><rect x="70.6" y="173" width="0.6" height="15.0" fill="rgb(212,33,8)" rx="2" ry="2" />
+<text  x="73.55" y="183.5" ></text>
+</g>
+<g >
+<title>flecs_table_fini_data (923,863 samples, 0.01%)</title><rect x="16.5" y="205" width="0.1" height="15.0" fill="rgb(247,194,46)" rx="2" ry="2" />
+<text  x="19.46" y="215.5" ></text>
+</g>
+<g >
+<title>fprintf (1,462,742 samples, 0.02%)</title><rect x="71.3" y="221" width="0.3" height="15.0" fill="rgb(247,195,46)" rx="2" ry="2" />
+<text  x="74.30" y="231.5" ></text>
+</g>
+<g >
+<title>fprintf (1,962,116 samples, 0.03%)</title><rect x="15.7" y="189" width="0.4" height="15.0" fill="rgb(247,195,46)" rx="2" ry="2" />
+<text  x="18.72" y="199.5" ></text>
+</g>
+<g >
+<title>flecs_stack_alloc.part.0 (66,885,399 samples, 0.97%)</title><rect x="1065.0" y="221" width="11.4" height="15.0" fill="rgb(226,98,23)" rx="2" ry="2" />
+<text  x="1068.02" y="231.5" ></text>
+</g>
+<g >
+<title>__printf_fp_l_buffer (2,948,516 samples, 0.04%)</title><rect x="58.0" y="125" width="0.5" height="15.0" fill="rgb(212,33,8)" rx="2" ry="2" />
+<text  x="60.96" y="135.5" ></text>
+</g>
+<g >
+<title>flecs_iter_calloc (979,013 samples, 0.01%)</title><rect x="61.8" y="157" width="0.1" height="15.0" fill="rgb(210,23,5)" rx="2" ry="2" />
+<text  x="64.78" y="167.5" ></text>
+</g>
+<g >
+<title>flecs_query_get_match_monitor (1,940,581 samples, 0.03%)</title><rect x="18.9" y="77" width="0.3" height="15.0" fill="rgb(239,159,38)" rx="2" ry="2" />
+<text  x="21.91" y="87.5" ></text>
+</g>
+<g >
+<title>ecs_query_next (378,181,129 samples, 5.46%)</title><rect x="1124.8" y="301" width="64.5" height="15.0" fill="rgb(207,11,2)" rx="2" ry="2" />
+<text  x="1127.84" y="311.5" >ecs_que..</text>
+</g>
+<g >
+<title>flecs_stack_get_cursor (1,965,852 samples, 0.03%)</title><rect x="51.3" y="109" width="0.3" height="15.0" fill="rgb(236,143,34)" rx="2" ry="2" />
+<text  x="54.27" y="119.5" ></text>
+</g>
+<g >
+<title>msort_with_tmp.part.0 (4,410,534 samples, 0.06%)</title><rect x="24.1" y="125" width="0.8" height="15.0" fill="rgb(250,211,50)" rx="2" ry="2" />
+<text  x="27.10" y="135.5" ></text>
+</g>
+<g >
+<title>flecs_query_apply_iter_flags (994,995 samples, 0.01%)</title><rect x="150.2" y="285" width="0.2" height="15.0" fill="rgb(250,207,49)" rx="2" ry="2" />
+<text  x="153.18" y="295.5" ></text>
+</g>
+<g >
+<title>ecs_table_count (19,825,086 samples, 0.29%)</title><rect x="1178.5" y="253" width="3.4" height="15.0" fill="rgb(219,68,16)" rx="2" ry="2" />
+<text  x="1181.49" y="263.5" ></text>
+</g>
+<g >
+<title>flecs_table_delete (967,264 samples, 0.01%)</title><rect x="65.4" y="141" width="0.2" height="15.0" fill="rgb(235,139,33)" rx="2" ry="2" />
+<text  x="68.45" y="151.5" ></text>
+</g>
+<g >
+<title>flecs_query_iter_constrain (973,165 samples, 0.01%)</title><rect x="62.0" y="157" width="0.2" height="15.0" fill="rgb(246,192,46)" rx="2" ry="2" />
+<text  x="65.03" y="167.5" ></text>
+</g>
+<g >
+<title>flecs_entity_index_is_alive (9,336,276 samples, 0.13%)</title><rect x="67.0" y="189" width="1.6" height="15.0" fill="rgb(244,182,43)" rx="2" ry="2" />
+<text  x="70.04" y="199.5" ></text>
+</g>
+<g >
+<title>msort_with_tmp.part.0 (3,442,333 samples, 0.05%)</title><rect x="10.8" y="125" width="0.6" height="15.0" fill="rgb(250,211,50)" rx="2" ry="2" />
+<text  x="13.78" y="135.5" ></text>
+</g>
+<g >
+<title>flecs_entity_index_get_any (1,473,651 samples, 0.02%)</title><rect x="30.6" y="141" width="0.3" height="15.0" fill="rgb(247,194,46)" rx="2" ry="2" />
+<text  x="33.62" y="151.5" ></text>
+</g>
+<g >
+<title>PerTickMetricsSystem.part.0.isra.0 (3,510,812 samples, 0.05%)</title><rect x="15.1" y="205" width="0.6" height="15.0" fill="rgb(214,43,10)" rx="2" ry="2" />
+<text  x="18.12" y="215.5" ></text>
+</g>
+<g >
+<title>flecs_cmd_new_batched (7,861,653 samples, 0.11%)</title><rect x="32.3" y="141" width="1.3" height="15.0" fill="rgb(240,164,39)" rx="2" ry="2" />
+<text  x="35.30" y="151.5" ></text>
+</g>
+<g >
+<title>fprintf (3,926,489 samples, 0.06%)</title><rect x="70.6" y="221" width="0.6" height="15.0" fill="rgb(247,195,46)" rx="2" ry="2" />
+<text  x="73.55" y="231.5" ></text>
+</g>
+<g >
+<title>VentureSystem (1,962,116 samples, 0.03%)</title><rect x="15.7" y="205" width="0.4" height="15.0" fill="rgb(234,134,32)" rx="2" ry="2" />
+<text  x="18.72" y="215.5" ></text>
+</g>
+<g >
+<title>relationships (6,927,755,255 samples, 100.00%)</title><rect x="10.0" y="349" width="1180.0" height="15.0" fill="rgb(235,141,33)" rx="2" ry="2" />
+<text  x="13.00" y="359.5" >relationships</text>
+</g>
+<g >
+<title>flecs_stack_alloc.part.0 (68,284,737 samples, 0.99%)</title><rect x="1096.6" y="221" width="11.6" height="15.0" fill="rgb(226,98,23)" rx="2" ry="2" />
+<text  x="1099.58" y="231.5" ></text>
+</g>
+<g >
+<title>__memmove_avx512_unaligned_erms (1,469,299 samples, 0.02%)</title><rect x="31.8" y="157" width="0.2" height="15.0" fill="rgb(223,84,20)" rx="2" ry="2" />
+<text  x="34.79" y="167.5" ></text>
+</g>
+<g >
+<title>flecs_table_invoke_dtor (923,863 samples, 0.01%)</title><rect x="16.5" y="173" width="0.1" height="15.0" fill="rgb(211,28,6)" rx="2" ry="2" />
+<text  x="19.46" y="183.5" ></text>
+</g>
+<g >
+<title>__memmove_avx512_unaligned_erms (69,741,430 samples, 1.01%)</title><rect x="1033.2" y="269" width="11.9" height="15.0" fill="rgb(223,84,20)" rx="2" ry="2" />
+<text  x="1036.19" y="279.5" ></text>
+</g>
+<g >
+<title>PerTickMetricsSystem.part.0.isra.0 (4,419,973 samples, 0.06%)</title><rect x="70.6" y="237" width="0.7" height="15.0" fill="rgb(214,43,10)" rx="2" ry="2" />
+<text  x="73.55" y="247.5" ></text>
+</g>
+<g >
+<title>VentureSystem (197,464,811 samples, 2.85%)</title><rect x="27.8" y="189" width="33.6" height="15.0" fill="rgb(234,134,32)" rx="2" ry="2" />
+<text  x="30.81" y="199.5" >Ve..</text>
+</g>
+<g >
+<title>flecs_table_fini (923,863 samples, 0.01%)</title><rect x="16.5" y="221" width="0.1" height="15.0" fill="rgb(209,20,4)" rx="2" ry="2" />
+<text  x="19.46" y="231.5" ></text>
+</g>
+<g >
+<title>count_alive (3,169,006 samples, 0.05%)</title><rect x="69.5" y="317" width="0.5" height="15.0" fill="rgb(210,24,5)" rx="2" ry="2" />
+<text  x="72.51" y="327.5" ></text>
+</g>
+<g >
+<title>__memset_avx512_unaligned_erms (713,119 samples, 0.01%)</title><rect x="69.7" y="285" width="0.1" height="15.0" fill="rgb(214,43,10)" rx="2" ry="2" />
+<text  x="72.67" y="295.5" ></text>
+</g>
+<g >
+<title>flecs_query_iter (4,398,950 samples, 0.06%)</title><rect x="61.4" y="173" width="0.8" height="15.0" fill="rgb(221,77,18)" rx="2" ry="2" />
+<text  x="64.44" y="183.5" ></text>
+</g>
+<g >
+<title>flecs_query_setids (13,752,040 samples, 0.20%)</title><rect x="1122.4" y="253" width="2.4" height="15.0" fill="rgb(226,99,23)" rx="2" ry="2" />
+<text  x="1125.41" y="263.5" ></text>
+</g>
+<g >
+<title>flecs_fini_roots (1,905,122 samples, 0.03%)</title><rect x="16.1" y="253" width="0.4" height="15.0" fill="rgb(205,4,0)" rx="2" ry="2" />
+<text  x="19.13" y="263.5" ></text>
+</g>
+<g >
+<title>flecs_sparse_get (3,455,610 samples, 0.05%)</title><rect x="33.0" y="125" width="0.6" height="15.0" fill="rgb(252,219,52)" rx="2" ry="2" />
+<text  x="36.05" y="135.5" ></text>
+</g>
+<g >
+<title>flecs_stack_calloc (101,174,388 samples, 1.46%)</title><rect x="1091.0" y="253" width="17.2" height="15.0" fill="rgb(227,101,24)" rx="2" ry="2" />
+<text  x="1093.98" y="263.5" ></text>
+</g>
+<g >
+<title>flecs_stack_alloc (2,939,945 samples, 0.04%)</title><rect x="147.7" y="253" width="0.5" height="15.0" fill="rgb(216,53,12)" rx="2" ry="2" />
+<text  x="150.68" y="263.5" ></text>
+</g>
+<g >
+<title>flecs_table_cache_next_ (2,449,551 samples, 0.04%)</title><rect x="152.6" y="285" width="0.4" height="15.0" fill="rgb(240,164,39)" rx="2" ry="2" />
+<text  x="155.61" y="295.5" ></text>
+</g>
+<g >
+<title>flecs_defer_end (1,412,238 samples, 0.02%)</title><rect x="16.1" y="237" width="0.3" height="15.0" fill="rgb(239,158,37)" rx="2" ry="2" />
+<text  x="19.13" y="247.5" ></text>
+</g>
+<g >
+<title>flecs_components_get (987,040 samples, 0.01%)</title><rect x="52.9" y="93" width="0.2" height="15.0" fill="rgb(210,25,5)" rx="2" ry="2" />
+<text  x="55.92" y="103.5" ></text>
+</g>
+<g >
+<title>flecs_entity_index_is_valid (1,476,998 samples, 0.02%)</title><rect x="66.5" y="157" width="0.3" height="15.0" fill="rgb(251,212,50)" rx="2" ry="2" />
+<text  x="69.53" y="167.5" ></text>
+</g>
+<g >
+<title>__memset_avx512_unaligned_erms (29,005,497 samples, 0.42%)</title><rect x="1055.8" y="253" width="4.9" height="15.0" fill="rgb(214,43,10)" rx="2" ry="2" />
+<text  x="1058.80" y="263.5" ></text>
+</g>
+<g >
+<title>find_relationship (6,084,109,416 samples, 87.82%)</title><rect x="153.5" y="317" width="1036.3" height="15.0" fill="rgb(221,74,17)" rx="2" ry="2" />
+<text  x="156.53" y="327.5" >find_relationship</text>
+</g>
+<g >
+<title>msort_with_tmp.part.0 (3,510,812 samples, 0.05%)</title><rect x="15.1" y="109" width="0.6" height="15.0" fill="rgb(250,211,50)" rx="2" ry="2" />
+<text  x="18.12" y="119.5" ></text>
+</g>
+<g >
+<title>AgentDeathSystem (2,968,309 samples, 0.04%)</title><rect x="70.0" y="237" width="0.6" height="15.0" fill="rgb(209,21,5)" rx="2" ry="2" />
+<text  x="73.05" y="247.5" ></text>
+</g>
+<g >
+<title>flecs_entity_index_try_get (7,856,727 samples, 0.11%)</title><rect x="67.3" y="173" width="1.3" height="15.0" fill="rgb(248,200,47)" rx="2" ry="2" />
+<text  x="70.29" y="183.5" ></text>
+</g>
+<g >
+<title>ecs_iter_fini (7,385,790 samples, 0.11%)</title><rect x="48.0" y="157" width="1.2" height="15.0" fill="rgb(208,17,4)" rx="2" ry="2" />
+<text  x="50.97" y="167.5" ></text>
+</g>
+<g >
+<title>flecs_query_change_detection (982,062 samples, 0.01%)</title><rect x="49.0" y="125" width="0.1" height="15.0" fill="rgb(213,38,9)" rx="2" ry="2" />
+<text  x="51.98" y="135.5" ></text>
+</g>
+<g >
+<title>flecs_query_trivial_search_init.part.0 (83,189,688 samples, 1.20%)</title><rect x="1151.0" y="253" width="14.1" height="15.0" fill="rgb(205,2,0)" rx="2" ry="2" />
+<text  x="1153.97" y="263.5" ></text>
+</g>
+<g >
+<title>flecs_stack_alloc.part.0 (1,473,024 samples, 0.02%)</title><rect x="51.0" y="77" width="0.3" height="15.0" fill="rgb(226,98,23)" rx="2" ry="2" />
+<text  x="54.01" y="87.5" ></text>
+</g>
+<g >
+<title>flecs_query_check_match_monitor_term (5,361,811 samples, 0.08%)</title><rect x="18.4" y="93" width="0.9" height="15.0" fill="rgb(206,5,1)" rx="2" ry="2" />
+<text  x="21.42" y="103.5" ></text>
+</g>
+<g >
+<title>ecs_iter_fini (2,941,093 samples, 0.04%)</title><rect x="150.9" y="301" width="0.5" height="15.0" fill="rgb(208,17,4)" rx="2" ry="2" />
+<text  x="153.94" y="311.5" ></text>
+</g>
+<g >
+<title>cmp_float (991,292 samples, 0.01%)</title><rect x="11.0" y="77" width="0.2" height="15.0" fill="rgb(233,129,30)" rx="2" ry="2" />
+<text  x="14.03" y="87.5" ></text>
+</g>
+<g >
+<title>flecs_stack_free (8,869,852 samples, 0.13%)</title><rect x="1005.2" y="269" width="1.5" height="15.0" fill="rgb(244,183,43)" rx="2" ry="2" />
+<text  x="1008.15" y="279.5" ></text>
+</g>
+<g >
+<title>flecs_defer_set (12,294,677 samples, 0.18%)</title><rect x="32.0" y="157" width="2.1" height="15.0" fill="rgb(253,224,53)" rx="2" ry="2" />
+<text  x="35.04" y="167.5" ></text>
+</g>
+<g >
+<title>__printf_fp_buffer_1.isra.0 (21,564,821 samples, 0.31%)</title><rect x="11.4" y="141" width="3.6" height="15.0" fill="rgb(254,229,54)" rx="2" ry="2" />
+<text  x="14.36" y="151.5" ></text>
+</g>
+<g >
+<title>ecs_iter_fini (6,373,406 samples, 0.09%)</title><rect x="1139.8" y="285" width="1.0" height="15.0" fill="rgb(208,17,4)" rx="2" ry="2" />
+<text  x="1142.75" y="295.5" ></text>
+</g>
+<g >
+<title>flecs_actions_move_remove (924,419 samples, 0.01%)</title><rect x="16.1" y="205" width="0.2" height="15.0" fill="rgb(206,5,1)" rx="2" ry="2" />
+<text  x="19.13" y="215.5" ></text>
+</g>
+<g >
+<title>flecs_bootstrap (711,328 samples, 0.01%)</title><rect x="69.0" y="333" width="0.1" height="15.0" fill="rgb(213,37,8)" rx="2" ry="2" />
+<text  x="72.02" y="343.5" ></text>
+</g>
+<g >
+<title>ecs_ref_update (985,307 samples, 0.01%)</title><rect x="65.6" y="61" width="0.2" height="15.0" fill="rgb(249,206,49)" rx="2" ry="2" />
+<text  x="68.61" y="71.5" ></text>
+</g>
+<g >
+<title>flecs_stack_get_cursor (25,861,325 samples, 0.37%)</title><rect x="1108.2" y="253" width="4.4" height="15.0" fill="rgb(236,143,34)" rx="2" ry="2" />
+<text  x="1111.21" y="263.5" ></text>
+</g>
+<g >
+<title>flecs_workers_progress (5,472,928 samples, 0.08%)</title><rect x="15.1" y="269" width="1.0" height="15.0" fill="rgb(232,126,30)" rx="2" ry="2" />
+<text  x="18.12" y="279.5" ></text>
+</g>
+<g >
+<title>flecs_init_table (717,640 samples, 0.01%)</title><rect x="68.9" y="173" width="0.1" height="15.0" fill="rgb(219,64,15)" rx="2" ry="2" />
+<text  x="71.90" y="183.5" ></text>
+</g>
+<g >
+<title>cmp_float (1,470,356 samples, 0.02%)</title><rect x="15.5" y="77" width="0.2" height="15.0" fill="rgb(233,129,30)" rx="2" ry="2" />
+<text  x="18.47" y="87.5" ></text>
+</g>
+<g >
+<title>msort_with_tmp.part.0 (3,510,812 samples, 0.05%)</title><rect x="15.1" y="141" width="0.6" height="15.0" fill="rgb(250,211,50)" rx="2" ry="2" />
+<text  x="18.12" y="151.5" ></text>
+</g>
+<g >
+<title>flecs_defer_end (36,772,118 samples, 0.53%)</title><rect x="62.5" y="205" width="6.3" height="15.0" fill="rgb(239,158,37)" rx="2" ry="2" />
+<text  x="65.53" y="215.5" ></text>
+</g>
+<g >
+<title>flecs_table_cache_next_ (95,261,478 samples, 1.38%)</title><rect x="1165.6" y="269" width="16.3" height="15.0" fill="rgb(240,164,39)" rx="2" ry="2" />
+<text  x="1168.64" y="279.5" ></text>
+</g>
+<g >
+<title>flecs_stack_alloc.part.0 (2,939,945 samples, 0.04%)</title><rect x="147.7" y="237" width="0.5" height="15.0" fill="rgb(226,98,23)" rx="2" ry="2" />
+<text  x="150.68" y="247.5" ></text>
+</g>
+<g >
+<title>TrustDecayAndAge (15,878,771 samples, 0.23%)</title><rect x="25.1" y="189" width="2.7" height="15.0" fill="rgb(232,127,30)" rx="2" ry="2" />
+<text  x="28.11" y="199.5" ></text>
+</g>
+<g >
+<title>flecs_table_invoke_ctor_for_array (985,307 samples, 0.01%)</title><rect x="65.6" y="93" width="0.2" height="15.0" fill="rgb(220,70,16)" rx="2" ry="2" />
+<text  x="68.61" y="103.5" ></text>
+</g>
+<g >
+<title>__printf_buffer_to_file_done (1,969,686 samples, 0.03%)</title><rect x="60.3" y="141" width="0.3" height="15.0" fill="rgb(248,202,48)" rx="2" ry="2" />
+<text  x="63.27" y="151.5" ></text>
+</g>
+<g >
+<title>qsort_r_mergesort (3,442,333 samples, 0.05%)</title><rect x="10.8" y="173" width="0.6" height="15.0" fill="rgb(217,57,13)" rx="2" ry="2" />
+<text  x="13.78" y="183.5" ></text>
+</g>
+<g >
+<title>flecs_iter_calloc (4,910,621 samples, 0.07%)</title><rect x="49.8" y="125" width="0.9" height="15.0" fill="rgb(210,23,5)" rx="2" ry="2" />
+<text  x="52.84" y="135.5" ></text>
+</g>
+<g >
+<title>PerTickMetricsSystem.part.0.isra.0 (6,391,398 samples, 0.09%)</title><rect x="10.3" y="221" width="1.1" height="15.0" fill="rgb(214,43,10)" rx="2" ry="2" />
+<text  x="13.27" y="231.5" ></text>
+</g>
+<g >
+<title>flecs_stack_alloc (70,748,457 samples, 1.02%)</title><rect x="1096.2" y="237" width="12.0" height="15.0" fill="rgb(216,53,12)" rx="2" ry="2" />
+<text  x="1099.16" y="247.5" ></text>
+</g>
+<g >
+<title>pick_partner (6,563,240,868 samples, 94.74%)</title><rect x="72.1" y="333" width="1117.9" height="15.0" fill="rgb(231,124,29)" rx="2" ry="2" />
+<text  x="75.09" y="343.5" >pick_partner</text>
+</g>
+<g >
+<title>flecs_iter_free (1,476,807 samples, 0.02%)</title><rect x="995.5" y="269" width="0.3" height="15.0" fill="rgb(227,105,25)" rx="2" ry="2" />
+<text  x="998.54" y="279.5" ></text>
+</g>
+<g >
+<title>ecs_progress (11,985,668 samples, 0.17%)</title><rect x="70.0" y="317" width="2.1" height="15.0" fill="rgb(247,197,47)" rx="2" ry="2" />
+<text  x="73.05" y="327.5" ></text>
+</g>
+<g >
+<title>main (309,624,094 samples, 4.47%)</title><rect x="16.1" y="285" width="52.7" height="15.0" fill="rgb(243,179,42)" rx="2" ry="2" />
+<text  x="19.05" y="295.5" >main</text>
+</g>
+<g >
+<title>rng_float (2,952,371 samples, 0.04%)</title><rect x="60.9" y="173" width="0.5" height="15.0" fill="rgb(237,151,36)" rx="2" ry="2" />
+<text  x="63.94" y="183.5" ></text>
+</g>
+<g >
+<title>flecs_run_system (28,445,981 samples, 0.41%)</title><rect x="10.3" y="237" width="4.8" height="15.0" fill="rgb(218,62,14)" rx="2" ry="2" />
+<text  x="13.27" y="247.5" ></text>
+</g>
+<g >
+<title>__GI___qsort_r (3,442,333 samples, 0.05%)</title><rect x="10.8" y="189" width="0.6" height="15.0" fill="rgb(239,156,37)" rx="2" ry="2" />
+<text  x="13.78" y="199.5" ></text>
+</g>
+<g >
+<title>ecs_progress (5,472,928 samples, 0.08%)</title><rect x="15.1" y="285" width="1.0" height="15.0" fill="rgb(247,197,47)" rx="2" ry="2" />
+<text  x="18.12" y="295.5" ></text>
+</g>
+<g >
+<title>flecs_iter_calloc (8,327,167 samples, 0.12%)</title><rect x="147.1" y="285" width="1.4" height="15.0" fill="rgb(210,23,5)" rx="2" ry="2" />
+<text  x="150.09" y="295.5" ></text>
+</g>
+<g >
+<title>ecs_time_measure (971,239 samples, 0.01%)</title><rect x="16.9" y="221" width="0.2" height="15.0" fill="rgb(246,190,45)" rx="2" ry="2" />
+<text  x="19.90" y="231.5" ></text>
+</g>
+<g >
+<title>ecs_set_id (1,469,219 samples, 0.02%)</title><rect x="28.8" y="157" width="0.3" height="15.0" fill="rgb(232,125,30)" rx="2" ry="2" />
+<text  x="31.81" y="167.5" ></text>
+</g>
+<g >
+<title>memcpy@@GLIBC_2.14@plt (1,970,648 samples, 0.03%)</title><rect x="57.6" y="109" width="0.4" height="15.0" fill="rgb(230,118,28)" rx="2" ry="2" />
+<text  x="60.62" y="119.5" ></text>
+</g>
+<g >
+<title>msort_with_tmp.part.0 (3,510,812 samples, 0.05%)</title><rect x="15.1" y="125" width="0.6" height="15.0" fill="rgb(250,211,50)" rx="2" ry="2" />
+<text  x="18.12" y="135.5" ></text>
+</g>
+<g >
+<title>__printf_buffer_write (984,194 samples, 0.01%)</title><rect x="10.5" y="157" width="0.2" height="15.0" fill="rgb(220,73,17)" rx="2" ry="2" />
+<text  x="13.53" y="167.5" ></text>
+</g>
+<g >
+<title>find_relationship (112,277,620 samples, 1.62%)</title><rect x="34.6" y="173" width="19.2" height="15.0" fill="rgb(221,74,17)" rx="2" ry="2" />
+<text  x="37.64" y="183.5" ></text>
+</g>
+<g >
+<title>SnapshotsSystem (986,080 samples, 0.01%)</title><rect x="24.9" y="189" width="0.1" height="15.0" fill="rgb(226,96,23)" rx="2" ry="2" />
+<text  x="27.85" y="199.5" ></text>
+</g>
+<g >
+<title>fprintf (21,564,821 samples, 0.31%)</title><rect x="11.4" y="205" width="3.6" height="15.0" fill="rgb(247,195,46)" rx="2" ry="2" />
+<text  x="14.36" y="215.5" ></text>
+</g>
+<g >
+<title>flecs_query_iter (11,794,172 samples, 0.17%)</title><rect x="17.3" y="173" width="2.0" height="15.0" fill="rgb(221,77,18)" rx="2" ry="2" />
+<text  x="20.32" y="183.5" ></text>
+</g>
+<g >
+<title>flecs_run_pipeline (303,162,711 samples, 4.38%)</title><rect x="17.2" y="237" width="51.6" height="15.0" fill="rgb(225,92,22)" rx="2" ry="2" />
+<text  x="20.15" y="247.5" >flecs..</text>
+</g>
+<g >
+<title>flecs_query_mark_fields_dirty (42,124,994 samples, 0.61%)</title><rect x="998.0" y="237" width="7.2" height="15.0" fill="rgb(234,137,32)" rx="2" ry="2" />
+<text  x="1000.98" y="247.5" ></text>
+</g>
+<g >
+<title>flecs_poly_is_ (3,932,300 samples, 0.06%)</title><rect x="1114.5" y="237" width="0.7" height="15.0" fill="rgb(239,160,38)" rx="2" ry="2" />
+<text  x="1117.54" y="247.5" ></text>
+</g>
+<g >
+<title>VentureSystem (21,564,821 samples, 0.31%)</title><rect x="11.4" y="221" width="3.6" height="15.0" fill="rgb(234,134,32)" rx="2" ry="2" />
+<text  x="14.36" y="231.5" ></text>
+</g>
+<g >
+<title>ecs_progress (28,445,981 samples, 0.41%)</title><rect x="10.3" y="301" width="4.8" height="15.0" fill="rgb(247,197,47)" rx="2" ry="2" />
+<text  x="13.27" y="311.5" ></text>
+</g>
+<g >
+<title>relationships_destroy_for_agent (1,492,972 samples, 0.02%)</title><rect x="70.3" y="221" width="0.3" height="15.0" fill="rgb(252,216,51)" rx="2" ry="2" />
+<text  x="73.30" y="231.5" ></text>
+</g>
+<g >
+<title>msort_with_tmp.part.0 (973,904 samples, 0.01%)</title><rect x="24.7" y="93" width="0.2" height="15.0" fill="rgb(250,211,50)" rx="2" ry="2" />
+<text  x="27.69" y="103.5" ></text>
+</g>
+<g >
+<title>flecs_query_iter_fini (1,473,102 samples, 0.02%)</title><rect x="151.0" y="285" width="0.3" height="15.0" fill="rgb(232,124,29)" rx="2" ry="2" />
+<text  x="154.03" y="295.5" ></text>
+</g>
+<g >
+<title>__vfprintf_internal (2,949,065 samples, 0.04%)</title><rect x="10.3" y="189" width="0.5" height="15.0" fill="rgb(232,125,30)" rx="2" ry="2" />
+<text  x="13.27" y="199.5" ></text>
+</g>
+<g >
+<title>ecs_strip_generation (4,897,764 samples, 0.07%)</title><rect x="1163.5" y="205" width="0.8" height="15.0" fill="rgb(221,76,18)" rx="2" ry="2" />
+<text  x="1166.47" y="215.5" ></text>
+</g>
+<g >
+<title>flecs_query_is_trivial_search (240,859,414 samples, 3.48%)</title><rect x="1140.8" y="285" width="41.1" height="15.0" fill="rgb(241,166,39)" rx="2" ry="2" />
+<text  x="1143.84" y="295.5" >fle..</text>
+</g>
+<g >
+<title>flecs_query_iter_fini (1,969,625 samples, 0.03%)</title><rect x="1139.9" y="269" width="0.4" height="15.0" fill="rgb(232,124,29)" rx="2" ry="2" />
+<text  x="1142.92" y="279.5" ></text>
+</g>
+<g >
+<title>flecs_pipeline_build.isra.0 (12,774,748 samples, 0.18%)</title><rect x="17.2" y="205" width="2.2" height="15.0" fill="rgb(228,108,25)" rx="2" ry="2" />
+<text  x="20.24" y="215.5" ></text>
+</g>
+<g >
+<title>flecs_add_id (717,640 samples, 0.01%)</title><rect x="68.9" y="285" width="0.1" height="15.0" fill="rgb(251,215,51)" rx="2" ry="2" />
+<text  x="71.90" y="295.5" ></text>
+</g>
+<g >
+<title>flecs_run_pipeline (11,985,668 samples, 0.17%)</title><rect x="70.0" y="285" width="2.1" height="15.0" fill="rgb(225,92,22)" rx="2" ry="2" />
+<text  x="73.05" y="295.5" ></text>
+</g>
+<g >
+<title>msort_with_tmp.part.0 (971,801 samples, 0.01%)</title><rect x="11.2" y="77" width="0.2" height="15.0" fill="rgb(250,211,50)" rx="2" ry="2" />
+<text  x="14.20" y="87.5" ></text>
+</g>
+<g >
+<title>flecs_query_is_trivial_search (9,318,987 samples, 0.13%)</title><rect x="151.4" y="301" width="1.6" height="15.0" fill="rgb(241,166,39)" rx="2" ry="2" />
+<text  x="154.44" y="311.5" ></text>
+</g>
+<g >
+<title>ecs_fini (3,754,502 samples, 0.05%)</title><rect x="16.1" y="269" width="0.6" height="15.0" fill="rgb(238,156,37)" rx="2" ry="2" />
+<text  x="19.05" y="279.5" ></text>
+</g>
+<g >
+<title>flecs_query_iter_fini (3,937,665 samples, 0.06%)</title><rect x="48.5" y="141" width="0.6" height="15.0" fill="rgb(232,124,29)" rx="2" ry="2" />
+<text  x="51.47" y="151.5" ></text>
+</g>
+<g >
+<title>flecs_query_iter (22,163,697 samples, 0.32%)</title><rect x="146.7" y="301" width="3.7" height="15.0" fill="rgb(221,77,18)" rx="2" ry="2" />
+<text  x="149.67" y="311.5" ></text>
+</g>
+<g >
+<title>ecs_new_w_id (1,463,718 samples, 0.02%)</title><rect x="28.6" y="157" width="0.2" height="15.0" fill="rgb(212,36,8)" rx="2" ry="2" />
+<text  x="31.56" y="167.5" ></text>
+</g>
+<g >
+<title>flecs_commit (4,410,064 samples, 0.06%)</title><rect x="65.1" y="173" width="0.8" height="15.0" fill="rgb(215,50,12)" rx="2" ry="2" />
+<text  x="68.11" y="183.5" ></text>
+</g>
+<g >
+<title>hack_digit (1,478,676 samples, 0.02%)</title><rect x="71.8" y="141" width="0.3" height="15.0" fill="rgb(253,222,53)" rx="2" ry="2" />
+<text  x="74.84" y="151.5" ></text>
+</g>
+<g >
+<title>ecs_frame_begin (976,519 samples, 0.01%)</title><rect x="16.7" y="253" width="0.2" height="15.0" fill="rgb(233,128,30)" rx="2" ry="2" />
+<text  x="19.74" y="263.5" ></text>
+</g>
+<g >
+<title>flecs_stage_merge (38,238,552 samples, 0.55%)</title><rect x="62.3" y="221" width="6.5" height="15.0" fill="rgb(247,194,46)" rx="2" ry="2" />
+<text  x="65.28" y="231.5" ></text>
+</g>
+<g >
+<title>flecs_stack_alloc.part.0 (21,918,177 samples, 0.32%)</title><rect x="1108.9" y="221" width="3.7" height="15.0" fill="rgb(226,98,23)" rx="2" ry="2" />
+<text  x="1111.88" y="231.5" ></text>
+</g>
+<g >
+<title>qsort_r_mergesort (3,510,812 samples, 0.05%)</title><rect x="15.1" y="157" width="0.6" height="15.0" fill="rgb(217,57,13)" rx="2" ry="2" />
+<text  x="18.12" y="167.5" ></text>
+</g>
+<g >
+<title>flecs_query_is_trivial_search (5,831,300 samples, 0.08%)</title><rect x="52.4" y="141" width="1.0" height="15.0" fill="rgb(241,166,39)" rx="2" ry="2" />
+<text  x="55.43" y="151.5" ></text>
+</g>
+<g >
+<title>flecs_query_apply_iter_flags (5,904,299 samples, 0.09%)</title><rect x="1115.4" y="269" width="1.0" height="15.0" fill="rgb(250,207,49)" rx="2" ry="2" />
+<text  x="1118.38" y="279.5" ></text>
+</g>
+<g >
+<title>flecs_stop_measure_frame (971,239 samples, 0.01%)</title><rect x="16.9" y="237" width="0.2" height="15.0" fill="rgb(248,202,48)" rx="2" ry="2" />
+<text  x="19.90" y="247.5" ></text>
+</g>
+<g >
+<title>flecs_query_iter (976,587 samples, 0.01%)</title><rect x="23.4" y="157" width="0.2" height="15.0" fill="rgb(221,77,18)" rx="2" ry="2" />
+<text  x="26.43" y="167.5" ></text>
+</g>
+<g >
+<title>__vfprintf_internal (3,926,489 samples, 0.06%)</title><rect x="70.6" y="205" width="0.6" height="15.0" fill="rgb(232,125,30)" rx="2" ry="2" />
+<text  x="73.55" y="215.5" ></text>
+</g>
+<g >
+<title>__vfprintf_internal (21,564,821 samples, 0.31%)</title><rect x="11.4" y="189" width="3.6" height="15.0" fill="rgb(232,125,30)" rx="2" ry="2" />
+<text  x="14.36" y="199.5" ></text>
+</g>
+<g >
+<title>__printf_buffer (35,254,089 samples, 0.51%)</title><rect x="54.3" y="141" width="6.0" height="15.0" fill="rgb(219,68,16)" rx="2" ry="2" />
+<text  x="57.27" y="151.5" ></text>
+</g>
+<g >
+<title>__vfprintf_internal (1,962,116 samples, 0.03%)</title><rect x="15.7" y="173" width="0.4" height="15.0" fill="rgb(232,125,30)" rx="2" ry="2" />
+<text  x="18.72" y="183.5" ></text>
+</g>
+<g >
+<title>__memset_avx512_unaligned (9,345,763 samples, 0.13%)</title><rect x="1088.6" y="253" width="1.6" height="15.0" fill="rgb(214,41,9)" rx="2" ry="2" />
+<text  x="1091.63" y="263.5" ></text>
+</g>
+<g >
+<title>flecs_run_system (11,985,668 samples, 0.17%)</title><rect x="70.0" y="253" width="2.1" height="15.0" fill="rgb(218,62,14)" rx="2" ry="2" />
+<text  x="73.05" y="263.5" ></text>
+</g>
+<g >
+<title>flecs_query_iter_run_ctx_init (1,967,928 samples, 0.03%)</title><rect x="53.4" y="141" width="0.4" height="15.0" fill="rgb(247,195,46)" rx="2" ry="2" />
+<text  x="56.43" y="151.5" ></text>
+</g>
+<g >
+<title>flecs_run_pipeline_ops (251,656,079 samples, 3.63%)</title><rect x="19.4" y="221" width="42.9" height="15.0" fill="rgb(228,105,25)" rx="2" ry="2" />
+<text  x="22.41" y="231.5" >flec..</text>
+</g>
+<g >
+<title>flecs_find_table_add (1,960,792 samples, 0.03%)</title><rect x="66.0" y="173" width="0.4" height="15.0" fill="rgb(209,20,4)" rx="2" ry="2" />
+<text  x="69.03" y="183.5" ></text>
+</g>
+<g >
+<title>flecs_sparse_get_page (986,603 samples, 0.01%)</title><rect x="33.5" y="109" width="0.1" height="15.0" fill="rgb(221,74,17)" rx="2" ry="2" />
+<text  x="36.47" y="119.5" ></text>
+</g>
+<g >
+<title>_itoa_word (5,244,177 samples, 0.08%)</title><rect x="59.4" y="125" width="0.9" height="15.0" fill="rgb(246,191,45)" rx="2" ry="2" />
+<text  x="62.38" y="135.5" ></text>
+</g>
+<g >
+<title>__printf_buffer (3,926,489 samples, 0.06%)</title><rect x="70.6" y="189" width="0.6" height="15.0" fill="rgb(219,68,16)" rx="2" ry="2" />
+<text  x="73.55" y="199.5" ></text>
+</g>
+<g >
+<title>__printf_buffer (2,949,065 samples, 0.04%)</title><rect x="10.3" y="173" width="0.5" height="15.0" fill="rgb(219,68,16)" rx="2" ry="2" />
+<text  x="13.27" y="183.5" ></text>
+</g>
+<g >
+<title>flecs_stage_from_world (1,955,835 samples, 0.03%)</title><rect x="148.2" y="269" width="0.3" height="15.0" fill="rgb(212,32,7)" rx="2" ry="2" />
+<text  x="151.18" y="279.5" ></text>
+</g>
+<g >
+<title>__printf_fp_buffer_1.isra.0 (3,134,644 samples, 0.05%)</title><rect x="71.6" y="157" width="0.5" height="15.0" fill="rgb(254,229,54)" rx="2" ry="2" />
+<text  x="74.55" y="167.5" ></text>
+</g>
+<g >
+<title>main (28,445,981 samples, 0.41%)</title><rect x="10.3" y="317" width="4.8" height="15.0" fill="rgb(243,179,42)" rx="2" ry="2" />
+<text  x="13.27" y="327.5" ></text>
+</g>
+<g >
+<title>flecs_entity_index_get_any (40,256,026 samples, 0.58%)</title><rect x="131.9" y="285" width="6.9" height="15.0" fill="rgb(247,194,46)" rx="2" ry="2" />
+<text  x="134.90" y="295.5" ></text>
+</g>
+<g >
+<title>__GI___qsort_r (4,410,534 samples, 0.06%)</title><rect x="24.1" y="157" width="0.8" height="15.0" fill="rgb(239,156,37)" rx="2" ry="2" />
+<text  x="27.10" y="167.5" ></text>
+</g>
+<g >
+<title>__printf_fp_buffer_1.isra.0 (3,926,489 samples, 0.06%)</title><rect x="70.6" y="157" width="0.6" height="15.0" fill="rgb(254,229,54)" rx="2" ry="2" />
+<text  x="73.55" y="167.5" ></text>
+</g>
+<g >
+<title>flecs_iter_init (184,539,890 samples, 2.66%)</title><rect x="1083.8" y="269" width="31.4" height="15.0" fill="rgb(211,30,7)" rx="2" ry="2" />
+<text  x="1086.78" y="279.5" >fl..</text>
+</g>
+<g >
+<title>__printf_fp_l_buffer (986,042 samples, 0.01%)</title><rect x="71.4" y="173" width="0.2" height="15.0" fill="rgb(212,33,8)" rx="2" ry="2" />
+<text  x="74.39" y="183.5" ></text>
+</g>
+<g >
+<title>flecs_type_info_dtor (923,863 samples, 0.01%)</title><rect x="16.5" y="157" width="0.1" height="15.0" fill="rgb(210,25,5)" rx="2" ry="2" />
+<text  x="19.46" y="167.5" ></text>
+</g>
+<g >
+<title>flecs_components_get (36,722,393 samples, 0.53%)</title><rect x="1158.1" y="237" width="6.2" height="15.0" fill="rgb(210,25,5)" rx="2" ry="2" />
+<text  x="1161.05" y="247.5" ></text>
+</g>
+<g >
+<title>__printf_buffer_flush_to_file (671,808 samples, 0.01%)</title><rect x="71.6" y="109" width="0.2" height="15.0" fill="rgb(247,197,47)" rx="2" ry="2" />
+<text  x="74.64" y="119.5" ></text>
+</g>
+<g >
+<title>__vfprintf_internal (3,134,644 samples, 0.05%)</title><rect x="71.6" y="205" width="0.5" height="15.0" fill="rgb(232,125,30)" rx="2" ry="2" />
+<text  x="74.55" y="215.5" ></text>
+</g>
+<g >
+<title>__printf_buffer (3,134,644 samples, 0.05%)</title><rect x="71.6" y="189" width="0.5" height="15.0" fill="rgb(219,68,16)" rx="2" ry="2" />
+<text  x="74.55" y="199.5" ></text>
+</g>
+<g >
+<title>flecs_start_measure_frame (976,519 samples, 0.01%)</title><rect x="16.7" y="237" width="0.2" height="15.0" fill="rgb(227,101,24)" rx="2" ry="2" />
+<text  x="19.74" y="247.5" ></text>
+</g>
+<g >
+<title>flecs_stage_from_world (54,387,413 samples, 0.79%)</title><rect x="1008.8" y="285" width="9.3" height="15.0" fill="rgb(212,32,7)" rx="2" ry="2" />
+<text  x="1011.84" y="295.5" ></text>
+</g>
+<g >
+<title>flecs_stack_alloc.part.0 (979,780 samples, 0.01%)</title><rect x="51.4" y="77" width="0.2" height="15.0" fill="rgb(226,98,23)" rx="2" ry="2" />
+<text  x="54.43" y="87.5" ></text>
+</g>
+<g >
+<title>create_relationship (5,880,597 samples, 0.08%)</title><rect x="28.6" y="173" width="1.0" height="15.0" fill="rgb(208,14,3)" rx="2" ry="2" />
+<text  x="31.56" y="183.5" ></text>
+</g>
+<g >
+<title>flecs_fini_store (923,863 samples, 0.01%)</title><rect x="16.5" y="253" width="0.1" height="15.0" fill="rgb(220,71,17)" rx="2" ry="2" />
+<text  x="19.46" y="263.5" ></text>
+</g>
+<g >
+<title>flecs_table_new (717,640 samples, 0.01%)</title><rect x="68.9" y="189" width="0.1" height="15.0" fill="rgb(253,224,53)" rx="2" ry="2" />
+<text  x="71.90" y="199.5" ></text>
+</g>
+<g >
+<title>_start (309,913,532 samples, 4.47%)</title><rect x="16.1" y="333" width="52.7" height="15.0" fill="rgb(245,185,44)" rx="2" ry="2" />
+<text  x="19.05" y="343.5" >_start</text>
+</g>
+<g >
+<title>flecs_run_pipeline (5,472,928 samples, 0.08%)</title><rect x="15.1" y="253" width="1.0" height="15.0" fill="rgb(225,92,22)" rx="2" ry="2" />
+<text  x="18.12" y="263.5" ></text>
+</g>
+<g >
+<title>fprintf (2,949,065 samples, 0.04%)</title><rect x="10.3" y="205" width="0.5" height="15.0" fill="rgb(247,195,46)" rx="2" ry="2" />
+<text  x="13.27" y="215.5" ></text>
+</g>
+<g >
+<title>__memset_avx512_unaligned_erms (20,141,847 samples, 0.29%)</title><rect x="1045.1" y="269" width="3.4" height="15.0" fill="rgb(214,43,10)" rx="2" ry="2" />
+<text  x="1048.07" y="279.5" ></text>
+</g>
+<g >
+<title>flecs_stack_calloc (1,473,024 samples, 0.02%)</title><rect x="51.0" y="109" width="0.3" height="15.0" fill="rgb(227,101,24)" rx="2" ry="2" />
+<text  x="54.01" y="119.5" ></text>
+</g>
+<g >
+<title>flecs_run_pipeline_ops (11,985,668 samples, 0.17%)</title><rect x="70.0" y="269" width="2.1" height="15.0" fill="rgb(228,105,25)" rx="2" ry="2" />
+<text  x="73.05" y="279.5" ></text>
+</g>
+<g >
+<title>flecs_query_change_detection (982,062 samples, 0.01%)</title><rect x="49.0" y="109" width="0.1" height="15.0" fill="rgb(213,38,9)" rx="2" ry="2" />
+<text  x="51.98" y="119.5" ></text>
+</g>
+<g >
+<title>flecs_query_iter_constrain (961,472 samples, 0.01%)</title><rect x="51.7" y="125" width="0.1" height="15.0" fill="rgb(246,192,46)" rx="2" ry="2" />
+<text  x="54.68" y="135.5" ></text>
+</g>
+<g >
+<title>flecs_query_cache_sort_tables (9,838,848 samples, 0.14%)</title><rect x="17.7" y="141" width="1.6" height="15.0" fill="rgb(233,130,31)" rx="2" ry="2" />
+<text  x="20.65" y="151.5" ></text>
+</g>
+<g >
+<title>ecs_field_w_size (10,826,242 samples, 0.16%)</title><rect x="966.7" y="301" width="1.8" height="15.0" fill="rgb(223,86,20)" rx="2" ry="2" />
+<text  x="969.69" y="311.5" ></text>
+</g>
+<g >
+<title>flecs_table_ensure.part.0 (717,640 samples, 0.01%)</title><rect x="68.9" y="205" width="0.1" height="15.0" fill="rgb(244,182,43)" rx="2" ry="2" />
+<text  x="71.90" y="215.5" ></text>
+</g>
+<g >
+<title>__printf_buffer_flush (671,808 samples, 0.01%)</title><rect x="71.6" y="125" width="0.2" height="15.0" fill="rgb(229,110,26)" rx="2" ry="2" />
+<text  x="74.64" y="135.5" ></text>
+</g>
+<g >
+<title>flecs_table_invoke_add_hooks (985,307 samples, 0.01%)</title><rect x="65.6" y="125" width="0.2" height="15.0" fill="rgb(237,150,36)" rx="2" ry="2" />
+<text  x="68.61" y="135.5" ></text>
+</g>
+<g >
+<title>flecs_table_invoke_ctor (985,307 samples, 0.01%)</title><rect x="65.6" y="109" width="0.2" height="15.0" fill="rgb(217,58,13)" rx="2" ry="2" />
+<text  x="68.61" y="119.5" ></text>
+</g>
+<g >
+<title>flecs_run_pipeline_ops (28,445,981 samples, 0.41%)</title><rect x="10.3" y="253" width="4.8" height="15.0" fill="rgb(228,105,25)" rx="2" ry="2" />
+<text  x="13.27" y="263.5" ></text>
+</g>
+<g >
+<title>flecs_query_change_detection (54,940,538 samples, 0.79%)</title><rect x="995.8" y="269" width="9.4" height="15.0" fill="rgb(213,38,9)" rx="2" ry="2" />
+<text  x="998.80" y="279.5" ></text>
+</g>
+<g >
+<title>flecs_run_pipeline_ops (5,472,928 samples, 0.08%)</title><rect x="15.1" y="237" width="1.0" height="15.0" fill="rgb(228,105,25)" rx="2" ry="2" />
+<text  x="18.12" y="247.5" ></text>
+</g>
+<g >
+<title>hack_digit (5,405,190 samples, 0.08%)</title><rect x="14.1" y="125" width="0.9" height="15.0" fill="rgb(253,222,53)" rx="2" ry="2" />
+<text  x="17.12" y="135.5" ></text>
+</g>
+<g >
+<title>all (6,927,755,255 samples, 100%)</title><rect x="10.0" y="365" width="1180.0" height="15.0" fill="rgb(213,39,9)" rx="2" ry="2" />
+<text  x="13.00" y="375.5" ></text>
+</g>
+<g >
+<title>ecs_query_iter (15,393,704 samples, 0.22%)</title><rect x="49.2" y="157" width="2.6" height="15.0" fill="rgb(228,108,25)" rx="2" ry="2" />
+<text  x="52.23" y="167.5" ></text>
+</g>
+<g >
+<title>flecs_components_get (977,347 samples, 0.01%)</title><rect x="152.3" y="253" width="0.1" height="15.0" fill="rgb(210,25,5)" rx="2" ry="2" />
+<text  x="155.28" y="263.5" ></text>
+</g>
+<g >
+<title>ecs_set_id (20,626,086 samples, 0.30%)</title><rect x="31.1" y="173" width="3.5" height="15.0" fill="rgb(232,125,30)" rx="2" ry="2" />
+<text  x="34.13" y="183.5" ></text>
+</g>
+<g >
+<title>ecs_field_w_size (974,290 samples, 0.01%)</title><rect x="19.9" y="173" width="0.2" height="15.0" fill="rgb(223,86,20)" rx="2" ry="2" />
+<text  x="22.92" y="183.5" ></text>
+</g>
+<g >
+<title>msort_with_tmp.part.0 (3,442,333 samples, 0.05%)</title><rect x="10.8" y="141" width="0.6" height="15.0" fill="rgb(250,211,50)" rx="2" ry="2" />
+<text  x="13.78" y="151.5" ></text>
+</g>
+<g >
+<title>ecs_query_iter (626,624,524 samples, 9.05%)</title><rect x="1018.1" y="301" width="106.7" height="15.0" fill="rgb(228,108,25)" rx="2" ry="2" />
+<text  x="1021.10" y="311.5" >ecs_query_iter</text>
+</g>
+<g >
+<title>ecs_get_id (223,011,185 samples, 3.22%)</title><rect x="108.6" y="317" width="38.0" height="15.0" fill="rgb(209,22,5)" rx="2" ry="2" />
+<text  x="111.60" y="327.5" >ecs..</text>
+</g>
+<g >
+<title>flecs_clean_tables (923,863 samples, 0.01%)</title><rect x="16.5" y="237" width="0.1" height="15.0" fill="rgb(215,49,11)" rx="2" ry="2" />
+<text  x="19.46" y="247.5" ></text>
+</g>
+<g >
+<title>fprintf (40,182,465 samples, 0.58%)</title><rect x="53.8" y="173" width="6.8" height="15.0" fill="rgb(247,195,46)" rx="2" ry="2" />
+<text  x="56.76" y="183.5" ></text>
+</g>
+<g >
+<title>flecs_stack_calloc (4,895,015 samples, 0.07%)</title><rect x="147.3" y="269" width="0.9" height="15.0" fill="rgb(227,101,24)" rx="2" ry="2" />
+<text  x="150.34" y="279.5" ></text>
+</g>
+<g >
+<title>flecs_iter_calloc (207,107,822 samples, 2.99%)</title><rect x="1048.5" y="269" width="35.3" height="15.0" fill="rgb(210,23,5)" rx="2" ry="2" />
+<text  x="1051.50" y="279.5" >fl..</text>
+</g>
+<g >
+<title>flecs_poly_is_ (16,268,821 samples, 0.23%)</title><rect x="1015.3" y="269" width="2.8" height="15.0" fill="rgb(239,160,38)" rx="2" ry="2" />
+<text  x="1018.33" y="279.5" ></text>
+</g>
+<g >
+<title>flecs_actions_on_add_intern (2,455,875 samples, 0.04%)</title><rect x="64.7" y="173" width="0.4" height="15.0" fill="rgb(219,65,15)" rx="2" ry="2" />
+<text  x="67.70" y="183.5" ></text>
+</g>
+<g >
+<title>flecs_stack_calloc (979,013 samples, 0.01%)</title><rect x="61.8" y="141" width="0.1" height="15.0" fill="rgb(227,101,24)" rx="2" ry="2" />
+<text  x="64.78" y="151.5" ></text>
+</g>
+<g >
+<title>flecs_stack_restore_cursor (12,772,784 samples, 0.18%)</title><rect x="1006.7" y="285" width="2.1" height="15.0" fill="rgb(216,51,12)" rx="2" ry="2" />
+<text  x="1009.67" y="295.5" ></text>
+</g>
+<g >
+<title>__memmove_avx512_unaligned_erms (2,946,080 samples, 0.04%)</title><rect x="57.0" y="109" width="0.5" height="15.0" fill="rgb(223,84,20)" rx="2" ry="2" />
+<text  x="60.03" y="119.5" ></text>
+</g>
+<g >
+<title>ecs_vec_append (963,189 samples, 0.01%)</title><rect x="32.9" y="109" width="0.1" height="15.0" fill="rgb(214,43,10)" rx="2" ry="2" />
+<text  x="35.88" y="119.5" ></text>
+</g>
+<g >
+<title>flecs_stage_from_world (3,433,545 samples, 0.05%)</title><rect x="1140.3" y="269" width="0.5" height="15.0" fill="rgb(212,32,7)" rx="2" ry="2" />
+<text  x="1143.25" y="279.5" ></text>
+</g>
+<g >
+<title>flecs_table_traverse_add (981,976 samples, 0.01%)</title><rect x="66.2" y="157" width="0.2" height="15.0" fill="rgb(244,181,43)" rx="2" ry="2" />
+<text  x="69.20" y="167.5" ></text>
+</g>
+<g >
+<title>flecs_stack_calloc (91,991,083 samples, 1.33%)</title><rect x="1060.7" y="253" width="15.7" height="15.0" fill="rgb(227,101,24)" rx="2" ry="2" />
+<text  x="1063.74" y="263.5" ></text>
+</g>
+<g >
+<title>flecs_cmd_batch_for_entity (18,639,877 samples, 0.27%)</title><rect x="63.8" y="189" width="3.2" height="15.0" fill="rgb(223,84,20)" rx="2" ry="2" />
+<text  x="66.78" y="199.5" ></text>
+</g>
+<g >
+<title>fprintf (3,134,644 samples, 0.05%)</title><rect x="71.6" y="221" width="0.5" height="15.0" fill="rgb(247,195,46)" rx="2" ry="2" />
+<text  x="74.55" y="231.5" ></text>
+</g>
+<g >
+<title>flecs_stack_calloc (982,179 samples, 0.01%)</title><rect x="50.3" y="109" width="0.2" height="15.0" fill="rgb(227,101,24)" rx="2" ry="2" />
+<text  x="53.35" y="119.5" ></text>
+</g>
+<g >
+<title>__GI___qsort_r (3,510,812 samples, 0.05%)</title><rect x="15.1" y="173" width="0.6" height="15.0" fill="rgb(239,156,37)" rx="2" ry="2" />
+<text  x="18.12" y="183.5" ></text>
+</g>
+<g >
+<title>msort_with_tmp.part.0 (3,442,333 samples, 0.05%)</title><rect x="10.8" y="157" width="0.6" height="15.0" fill="rgb(250,211,50)" rx="2" ry="2" />
+<text  x="13.78" y="167.5" ></text>
+</g>
+<g >
+<title>ecs_query_iter (976,587 samples, 0.01%)</title><rect x="23.4" y="173" width="0.2" height="15.0" fill="rgb(228,108,25)" rx="2" ry="2" />
+<text  x="26.43" y="183.5" ></text>
+</g>
+<g >
+<title>ecs_query_init (3,169,006 samples, 0.05%)</title><rect x="69.5" y="301" width="0.5" height="15.0" fill="rgb(228,108,25)" rx="2" ry="2" />
+<text  x="72.51" y="311.5" ></text>
+</g>
+<g >
+<title>flecs_run_pipeline (28,445,981 samples, 0.41%)</title><rect x="10.3" y="269" width="4.8" height="15.0" fill="rgb(225,92,22)" rx="2" ry="2" />
+<text  x="13.27" y="279.5" ></text>
+</g>
+<g >
+<title>flecs_stage_from_world (976,705 samples, 0.01%)</title><rect x="151.3" y="285" width="0.1" height="15.0" fill="rgb(212,32,7)" rx="2" ry="2" />
+<text  x="154.28" y="295.5" ></text>
+</g>
+<g >
+<title>__strchrnul_ifunc@plt (985,885 samples, 0.01%)</title><rect x="59.1" y="125" width="0.2" height="15.0" fill="rgb(254,229,54)" rx="2" ry="2" />
+<text  x="62.13" y="135.5" ></text>
+</g>
+<g >
+<title>qsort_r_mergesort (4,410,534 samples, 0.06%)</title><rect x="24.1" y="141" width="0.8" height="15.0" fill="rgb(217,57,13)" rx="2" ry="2" />
+<text  x="27.10" y="151.5" ></text>
+</g>
+<g >
+<title>flecs_component_hash (15,007,278 samples, 0.22%)</title><rect x="1161.8" y="221" width="2.5" height="15.0" fill="rgb(207,10,2)" rx="2" ry="2" />
+<text  x="1164.75" y="231.5" ></text>
+</g>
+<g >
+<title>ecs_iter_fini (987,794 samples, 0.01%)</title><rect x="52.3" y="141" width="0.1" height="15.0" fill="rgb(208,17,4)" rx="2" ry="2" />
+<text  x="55.27" y="151.5" ></text>
+</g>
+<g >
+<title>flecs_entity_index_try_get_any (2,946,487 samples, 0.04%)</title><rect x="68.1" y="157" width="0.5" height="15.0" fill="rgb(216,50,12)" rx="2" ry="2" />
+<text  x="71.13" y="167.5" ></text>
+</g>
+<g >
+<title>flecs_defer_get_existing (1,968,740 samples, 0.03%)</title><rect x="33.6" y="141" width="0.4" height="15.0" fill="rgb(215,47,11)" rx="2" ry="2" />
+<text  x="36.64" y="151.5" ></text>
+</g>
+<g >
+<title>flecs_query_iter_constrain (46,681,930 samples, 0.67%)</title><rect x="1116.8" y="269" width="8.0" height="15.0" fill="rgb(246,192,46)" rx="2" ry="2" />
+<text  x="1119.80" y="279.5" ></text>
+</g>
+<g >
+<title>__printf_fp_buffer_1.isra.0 (986,042 samples, 0.01%)</title><rect x="71.4" y="157" width="0.2" height="15.0" fill="rgb(254,229,54)" rx="2" ry="2" />
+<text  x="74.39" y="167.5" ></text>
+</g>
+<g >
+<title>flecs_run_system (5,472,928 samples, 0.08%)</title><rect x="15.1" y="221" width="1.0" height="15.0" fill="rgb(218,62,14)" rx="2" ry="2" />
+<text  x="18.12" y="231.5" ></text>
+</g>
+<g >
+<title>main (15,154,674 samples, 0.22%)</title><rect x="69.5" y="333" width="2.6" height="15.0" fill="rgb(243,179,42)" rx="2" ry="2" />
+<text  x="72.51" y="343.5" ></text>
+</g>
+<g >
+<title>ecs_ref_get_id (985,307 samples, 0.01%)</title><rect x="65.6" y="77" width="0.2" height="15.0" fill="rgb(248,199,47)" rx="2" ry="2" />
+<text  x="68.61" y="87.5" ></text>
+</g>
+<g >
+<title>flecs_query_iter_fini (142,502,470 samples, 2.06%)</title><rect x="982.4" y="285" width="24.3" height="15.0" fill="rgb(232,124,29)" rx="2" ry="2" />
+<text  x="985.39" y="295.5" >f..</text>
+</g>
+<g >
+<title>flecs_poly_is_ (17,144,218 samples, 0.25%)</title><rect x="1080.9" y="237" width="2.9" height="15.0" fill="rgb(239,160,38)" rx="2" ry="2" />
+<text  x="1083.86" y="247.5" ></text>
+</g>
+<g >
+<title>flecs_query_trivial_search_init (2,875,815 samples, 0.04%)</title><rect x="52.7" y="125" width="0.5" height="15.0" fill="rgb(245,188,45)" rx="2" ry="2" />
+<text  x="55.69" y="135.5" ></text>
+</g>
+<g >
+<title>ecs_iter_fini (291,045,706 samples, 4.20%)</title><rect x="968.5" y="301" width="49.6" height="15.0" fill="rgb(208,17,4)" rx="2" ry="2" />
+<text  x="971.53" y="311.5" >ecs_i..</text>
+</g>
+<g >
+<title>msort_with_tmp.part.0 (2,447,121 samples, 0.04%)</title><rect x="24.4" y="109" width="0.5" height="15.0" fill="rgb(250,211,50)" rx="2" ry="2" />
+<text  x="27.44" y="119.5" ></text>
+</g>
+<g >
+<title>flecs_stack_alloc (68,856,415 samples, 0.99%)</title><rect x="1064.7" y="237" width="11.7" height="15.0" fill="rgb(216,53,12)" rx="2" ry="2" />
+<text  x="1067.68" y="247.5" ></text>
+</g>
+<g >
+<title>ecs_vec_get (1,963,255 samples, 0.03%)</title><rect x="67.8" y="157" width="0.3" height="15.0" fill="rgb(229,114,27)" rx="2" ry="2" />
+<text  x="70.79" y="167.5" ></text>
+</g>
+<g >
+<title>__printf_fp_l_buffer (3,134,644 samples, 0.05%)</title><rect x="71.6" y="173" width="0.5" height="15.0" fill="rgb(212,33,8)" rx="2" ry="2" />
+<text  x="74.55" y="183.5" ></text>
+</g>
+<g >
+<title>flecs_get_base_component (1,480,743 samples, 0.02%)</title><rect x="30.9" y="157" width="0.2" height="15.0" fill="rgb(234,136,32)" rx="2" ry="2" />
+<text  x="33.87" y="167.5" ></text>
+</g>
+<g >
+<title>flecs_pipeline_update (12,774,748 samples, 0.18%)</title><rect x="17.2" y="221" width="2.2" height="15.0" fill="rgb(224,88,21)" rx="2" ry="2" />
+<text  x="20.24" y="231.5" ></text>
+</g>
+<g >
+<title>flecs_table_init (717,640 samples, 0.01%)</title><rect x="68.9" y="157" width="0.1" height="15.0" fill="rgb(219,64,15)" rx="2" ry="2" />
+<text  x="71.90" y="167.5" ></text>
+</g>
+<g >
+<title>__libc_start_call_main (5,472,928 samples, 0.08%)</title><rect x="15.1" y="317" width="1.0" height="15.0" fill="rgb(210,26,6)" rx="2" ry="2" />
+<text  x="18.12" y="327.5" ></text>
+</g>
+<g >
+<title>flecs_query_iter_run_ctx_init (41,901,314 samples, 0.60%)</title><rect x="1181.9" y="285" width="7.1" height="15.0" fill="rgb(247,195,46)" rx="2" ry="2" />
+<text  x="1184.86" y="295.5" ></text>
+</g>
+<g >
+<title>flecs_query_check_table_monitor_match (5,361,811 samples, 0.08%)</title><rect x="18.4" y="109" width="0.9" height="15.0" fill="rgb(239,158,37)" rx="2" ry="2" />
+<text  x="21.42" y="119.5" ></text>
+</g>
+<g >
+<title>ecs_vec_get (16,735,475 samples, 0.24%)</title><rect x="135.9" y="269" width="2.9" height="15.0" fill="rgb(229,114,27)" rx="2" ry="2" />
+<text  x="138.91" y="279.5" ></text>
+</g>
+<g >
+<title>__mpn_mul_1 (1,478,676 samples, 0.02%)</title><rect x="71.8" y="125" width="0.3" height="15.0" fill="rgb(246,190,45)" rx="2" ry="2" />
+<text  x="74.84" y="135.5" ></text>
+</g>
+<g >
+<title>__libc_start_call_main (309,624,094 samples, 4.47%)</title><rect x="16.1" y="301" width="52.7" height="15.0" fill="rgb(210,26,6)" rx="2" ry="2" />
+<text  x="19.05" y="311.5" >__lib..</text>
+</g>
+<g >
+<title>flecs_poly_is_ (1,473,782 samples, 0.02%)</title><rect x="1140.6" y="253" width="0.2" height="15.0" fill="rgb(239,160,38)" rx="2" ry="2" />
+<text  x="1143.59" y="263.5" ></text>
+</g>
+<g >
+<title>flecs_workers_progress (28,445,981 samples, 0.41%)</title><rect x="10.3" y="285" width="4.8" height="15.0" fill="rgb(232,126,30)" rx="2" ry="2" />
+<text  x="13.27" y="295.5" ></text>
+</g>
+<g >
+<title>MetabolismSystem (1,465,604 samples, 0.02%)</title><rect x="19.8" y="189" width="0.3" height="15.0" fill="rgb(248,197,47)" rx="2" ry="2" />
+<text  x="22.84" y="199.5" ></text>
+</g>
+<g >
+<title>flecs_entity_index_get_any (985,772 samples, 0.01%)</title><rect x="34.0" y="125" width="0.1" height="15.0" fill="rgb(247,194,46)" rx="2" ry="2" />
+<text  x="36.97" y="135.5" ></text>
+</g>
+<g >
+<title>flecs_stack_alloc.part.0 (2,467,092 samples, 0.04%)</title><rect x="149.8" y="237" width="0.4" height="15.0" fill="rgb(226,98,23)" rx="2" ry="2" />
+<text  x="152.76" y="247.5" ></text>
+</g>
+<g >
+<title>gini (3,510,812 samples, 0.05%)</title><rect x="15.1" y="189" width="0.6" height="15.0" fill="rgb(231,119,28)" rx="2" ry="2" />
+<text  x="18.12" y="199.5" ></text>
+</g>
+<g >
+<title>__libc_start_main@@GLIBC_2.34 (5,472,928 samples, 0.08%)</title><rect x="15.1" y="333" width="1.0" height="15.0" fill="rgb(229,113,27)" rx="2" ry="2" />
+<text  x="18.12" y="343.5" ></text>
+</g>
+<g >
+<title>stbds_hmdel_key (987,209 samples, 0.01%)</title><rect x="70.4" y="205" width="0.2" height="15.0" fill="rgb(224,90,21)" rx="2" ry="2" />
+<text  x="73.38" y="215.5" ></text>
+</g>
+<g >
+<title>stbds_hmput_key (2,457,266 samples, 0.04%)</title><rect x="29.1" y="157" width="0.5" height="15.0" fill="rgb(242,170,40)" rx="2" ry="2" />
+<text  x="32.15" y="167.5" ></text>
+</g>
+<g >
+<title>ecs_query_next (17,604,501 samples, 0.25%)</title><rect x="150.4" y="317" width="3.0" height="15.0" fill="rgb(207,11,2)" rx="2" ry="2" />
+<text  x="153.45" y="327.5" ></text>
+</g>
+<g >
+<title>flecs_query_mark_fields_dirty (982,062 samples, 0.01%)</title><rect x="49.0" y="93" width="0.1" height="15.0" fill="rgb(234,137,32)" rx="2" ry="2" />
+<text  x="51.98" y="103.5" ></text>
+</g>
+<g >
+<title>flecs_table_bloom_filter_test (2,945,017 samples, 0.04%)</title><rect x="1165.1" y="269" width="0.5" height="15.0" fill="rgb(222,78,18)" rx="2" ry="2" />
+<text  x="1168.14" y="279.5" ></text>
+</g>
+<g >
+<title>flecs_table_cache_iter (4,879,154 samples, 0.07%)</title><rect x="1164.3" y="237" width="0.8" height="15.0" fill="rgb(225,94,22)" rx="2" ry="2" />
+<text  x="1167.31" y="247.5" ></text>
+</g>
+<g >
+<title>flecs_iter_init (9,829,687 samples, 0.14%)</title><rect x="148.5" y="285" width="1.7" height="15.0" fill="rgb(211,30,7)" rx="2" ry="2" />
+<text  x="151.51" y="295.5" ></text>
+</g>
+<g >
+<title>pick_partner (1,961,385 samples, 0.03%)</title><rect x="60.6" y="173" width="0.3" height="15.0" fill="rgb(231,124,29)" rx="2" ry="2" />
+<text  x="63.61" y="183.5" ></text>
+</g>
+<g >
+<title>__printf_buffer_write (1,655,968 samples, 0.02%)</title><rect x="71.6" y="141" width="0.2" height="15.0" fill="rgb(220,73,17)" rx="2" ry="2" />
+<text  x="74.55" y="151.5" ></text>
+</g>
+<g >
+<title>flecs_query_cache_init (717,640 samples, 0.01%)</title><rect x="68.9" y="301" width="0.1" height="15.0" fill="rgb(228,107,25)" rx="2" ry="2" />
+<text  x="71.90" y="311.5" ></text>
+</g>
+<g >
+<title>ecs_query_iter (22,657,570 samples, 0.33%)</title><rect x="146.6" y="317" width="3.8" height="15.0" fill="rgb(228,108,25)" rx="2" ry="2" />
+<text  x="149.59" y="327.5" ></text>
+</g>
+<g >
+<title>PerTickMetricsSystem.part.0.isra.0 (27,978,534 samples, 0.40%)</title><rect x="20.1" y="189" width="4.8" height="15.0" fill="rgb(214,43,10)" rx="2" ry="2" />
+<text  x="23.09" y="199.5" ></text>
+</g>
+<g >
+<title>ecs_get_world (26,576,567 samples, 0.38%)</title><rect x="126.7" y="301" width="4.5" height="15.0" fill="rgb(218,61,14)" rx="2" ry="2" />
+<text  x="129.71" y="311.5" ></text>
+</g>
+<g >
+<title>msort_with_tmp.part.0 (3,442,333 samples, 0.05%)</title><rect x="10.8" y="109" width="0.6" height="15.0" fill="rgb(250,211,50)" rx="2" ry="2" />
+<text  x="13.78" y="119.5" ></text>
+</g>
+<g >
+<title>ecs_table_count (1,959,443 samples, 0.03%)</title><rect x="1149.1" y="269" width="0.4" height="15.0" fill="rgb(219,68,16)" rx="2" ry="2" />
+<text  x="1152.13" y="279.5" ></text>
+</g>
+<g >
+<title>flecs_instantiate (976,358 samples, 0.01%)</title><rect x="64.9" y="141" width="0.2" height="15.0" fill="rgb(234,133,31)" rx="2" ry="2" />
+<text  x="67.95" y="151.5" ></text>
+</g>
+<g >
+<title>flecs_stack_alloc (979,780 samples, 0.01%)</title><rect x="51.4" y="93" width="0.2" height="15.0" fill="rgb(216,53,12)" rx="2" ry="2" />
+<text  x="54.43" y="103.5" ></text>
+</g>
+<g >
+<title>__libc_start_main@@GLIBC_2.34 (309,624,094 samples, 4.47%)</title><rect x="16.1" y="317" width="52.7" height="15.0" fill="rgb(229,113,27)" rx="2" ry="2" />
+<text  x="19.05" y="327.5" >__lib..</text>
+</g>
+<g >
+<title>ecs_query_iter (4,398,950 samples, 0.06%)</title><rect x="61.4" y="189" width="0.8" height="15.0" fill="rgb(228,108,25)" rx="2" ry="2" />
+<text  x="64.44" y="199.5" ></text>
+</g>
+<g >
+<title>__printf_fp_l_buffer (1,962,116 samples, 0.03%)</title><rect x="15.7" y="141" width="0.4" height="15.0" fill="rgb(212,33,8)" rx="2" ry="2" />
+<text  x="18.72" y="151.5" ></text>
+</g>
+<g >
+<title>ecs_new (984,282 samples, 0.01%)</title><rect x="28.6" y="141" width="0.2" height="15.0" fill="rgb(233,129,31)" rx="2" ry="2" />
+<text  x="31.64" y="151.5" ></text>
+</g>
+<g >
+<title>flecs_emit (2,455,875 samples, 0.04%)</title><rect x="64.7" y="157" width="0.4" height="15.0" fill="rgb(224,88,21)" rx="2" ry="2" />
+<text  x="67.70" y="167.5" ></text>
+</g>
+<g >
+<title>flecs_stack_alloc (22,905,012 samples, 0.33%)</title><rect x="1108.7" y="237" width="3.9" height="15.0" fill="rgb(216,53,12)" rx="2" ry="2" />
+<text  x="1111.71" y="247.5" ></text>
+</g>
+<g >
+<title>__memset_avx512_unaligned_erms (1,479,067 samples, 0.02%)</title><rect x="50.1" y="109" width="0.2" height="15.0" fill="rgb(214,43,10)" rx="2" ry="2" />
+<text  x="53.09" y="119.5" ></text>
+</g>
+<g >
+<title>ecs_query_next (11,246,993 samples, 0.16%)</title><rect x="51.8" y="157" width="2.0" height="15.0" fill="rgb(207,11,2)" rx="2" ry="2" />
+<text  x="54.85" y="167.5" ></text>
+</g>
+<g >
+<title>gini (3,442,333 samples, 0.05%)</title><rect x="10.8" y="205" width="0.6" height="15.0" fill="rgb(231,119,28)" rx="2" ry="2" />
+<text  x="13.78" y="215.5" ></text>
+</g>
+<g >
+<title>__printf_buffer (1,462,742 samples, 0.02%)</title><rect x="71.3" y="189" width="0.3" height="15.0" fill="rgb(219,68,16)" rx="2" ry="2" />
+<text  x="74.30" y="199.5" ></text>
+</g>
+<g >
+<title>flecs_table_move (985,307 samples, 0.01%)</title><rect x="65.6" y="141" width="0.2" height="15.0" fill="rgb(249,205,49)" rx="2" ry="2" />
+<text  x="68.61" y="151.5" ></text>
+</g>
+<g >
+<title>flecs_stack_calloc (6,869,275 samples, 0.10%)</title><rect x="148.6" y="269" width="1.2" height="15.0" fill="rgb(227,101,24)" rx="2" ry="2" />
+<text  x="151.59" y="279.5" ></text>
+</g>
+<g >
+<title>__printf_buffer_write (9,807,669 samples, 0.14%)</title><rect x="56.3" y="125" width="1.7" height="15.0" fill="rgb(220,73,17)" rx="2" ry="2" />
+<text  x="59.28" y="135.5" ></text>
+</g>
+<g >
+<title>ecs_progress (305,610,594 samples, 4.41%)</title><rect x="16.7" y="269" width="52.1" height="15.0" fill="rgb(247,197,47)" rx="2" ry="2" />
+<text  x="19.74" y="279.5" >ecs_p..</text>
+</g>
+<g >
+<title>cmp_float (983,525 samples, 0.01%)</title><rect x="24.3" y="109" width="0.1" height="15.0" fill="rgb(233,129,30)" rx="2" ry="2" />
+<text  x="27.27" y="119.5" ></text>
+</g>
+<g >
+<title>flecs_query_trivial_search_init (91,041,092 samples, 1.31%)</title><rect x="1149.6" y="269" width="15.5" height="15.0" fill="rgb(245,188,45)" rx="2" ry="2" />
+<text  x="1152.63" y="279.5" ></text>
+</g>
+<g >
+<title>ecs_ensure_id (986,080 samples, 0.01%)</title><rect x="24.9" y="173" width="0.1" height="15.0" fill="rgb(226,98,23)" rx="2" ry="2" />
+<text  x="27.85" y="183.5" ></text>
+</g>
+<g >
+<title>flecs_iter_init (5,896,612 samples, 0.09%)</title><rect x="50.7" y="125" width="1.0" height="15.0" fill="rgb(211,30,7)" rx="2" ry="2" />
+<text  x="53.68" y="135.5" ></text>
+</g>
+<g >
+<title>flecs_query_create_cache (717,640 samples, 0.01%)</title><rect x="68.9" y="317" width="0.1" height="15.0" fill="rgb(237,151,36)" rx="2" ry="2" />
+<text  x="71.90" y="327.5" ></text>
+</g>
+<g >
+<title>flecs_query_trivial_search_init.part.0 (2,875,815 samples, 0.04%)</title><rect x="52.7" y="109" width="0.5" height="15.0" fill="rgb(205,2,0)" rx="2" ry="2" />
+<text  x="55.69" y="119.5" ></text>
+</g>
+<g >
+<title>flecs_query_cache_iter_init (2,464,713 samples, 0.04%)</title><rect x="1116.4" y="269" width="0.4" height="15.0" fill="rgb(248,198,47)" rx="2" ry="2" />
+<text  x="1119.38" y="279.5" ></text>
+</g>
+<g >
+<title>flecs_query_trivial_search_init (5,399,696 samples, 0.08%)</title><rect x="151.6" y="285" width="0.9" height="15.0" fill="rgb(245,188,45)" rx="2" ry="2" />
+<text  x="154.61" y="295.5" ></text>
+</g>
+<g >
+<title>flecs_query_iter (614,714,959 samples, 8.87%)</title><rect x="1020.1" y="285" width="104.7" height="15.0" fill="rgb(221,77,18)" rx="2" ry="2" />
+<text  x="1023.13" y="295.5" >flecs_query_..</text>
+</g>
+<g >
+<title>flecs_entity_index_get (44,177,356 samples, 0.64%)</title><rect x="131.2" y="301" width="7.6" height="15.0" fill="rgb(229,113,27)" rx="2" ry="2" />
+<text  x="134.23" y="311.5" ></text>
+</g>
+<g >
+<title>__memset_avx512_unaligned_erms (4,430,945 samples, 0.06%)</title><rect x="1090.2" y="253" width="0.8" height="15.0" fill="rgb(214,43,10)" rx="2" ry="2" />
+<text  x="1093.22" y="263.5" ></text>
+</g>
+<g >
+<title>flecs_move_entity (2,936,567 samples, 0.04%)</title><rect x="65.3" y="157" width="0.5" height="15.0" fill="rgb(237,147,35)" rx="2" ry="2" />
+<text  x="68.28" y="167.5" ></text>
+</g>
+<g >
+<title>__strchrnul_evex (3,934,478 samples, 0.06%)</title><rect x="58.5" y="125" width="0.6" height="15.0" fill="rgb(239,159,38)" rx="2" ry="2" />
+<text  x="61.46" y="135.5" ></text>
+</g>
+<g >
+<title>__printf_buffer (1,962,116 samples, 0.03%)</title><rect x="15.7" y="157" width="0.4" height="15.0" fill="rgb(219,68,16)" rx="2" ry="2" />
+<text  x="18.72" y="167.5" ></text>
+</g>
+<g >
+<title>__libc_start_call_main (28,445,981 samples, 0.41%)</title><rect x="10.3" y="333" width="4.8" height="15.0" fill="rgb(210,26,6)" rx="2" ry="2" />
+<text  x="13.27" y="343.5" ></text>
+</g>
+<g >
+<title>ecs_vec_get (985,772 samples, 0.01%)</title><rect x="34.0" y="109" width="0.1" height="15.0" fill="rgb(229,114,27)" rx="2" ry="2" />
+<text  x="36.97" y="119.5" ></text>
+</g>
+<g >
+<title>__expf_fma (107,685,668 samples, 1.55%)</title><rect x="90.3" y="317" width="18.3" height="15.0" fill="rgb(222,81,19)" rx="2" ry="2" />
+<text  x="93.26" y="327.5" ></text>
+</g>
+<g >
+<title>ecs_ensure_id (978,849 samples, 0.01%)</title><rect x="23.3" y="173" width="0.1" height="15.0" fill="rgb(226,98,23)" rx="2" ry="2" />
+<text  x="26.27" y="183.5" ></text>
+</g>
+<g >
+<title>flecs_stage_from_world (2,937,222 samples, 0.04%)</title><rect x="34.1" y="157" width="0.5" height="15.0" fill="rgb(212,32,7)" rx="2" ry="2" />
+<text  x="37.14" y="167.5" ></text>
+</g>
+<g >
+<title>flecs_query_iter_run_ctx_init (1,958,638 samples, 0.03%)</title><rect x="153.0" y="301" width="0.4" height="15.0" fill="rgb(247,195,46)" rx="2" ry="2" />
+<text  x="156.03" y="311.5" ></text>
+</g>
+<g >
+<title>flecs_stack_get_cursor (2,467,092 samples, 0.04%)</title><rect x="149.8" y="269" width="0.4" height="15.0" fill="rgb(236,143,34)" rx="2" ry="2" />
+<text  x="152.76" y="279.5" ></text>
+</g>
+<g >
+<title>gini (6,376,029 samples, 0.09%)</title><rect x="23.8" y="173" width="1.1" height="15.0" fill="rgb(231,119,28)" rx="2" ry="2" />
+<text  x="26.77" y="183.5" ></text>
+</g>
+<g >
+<title>flecs_stack_alloc.part.0 (3,441,566 samples, 0.05%)</title><rect x="149.2" y="237" width="0.6" height="15.0" fill="rgb(226,98,23)" rx="2" ry="2" />
+<text  x="152.18" y="247.5" ></text>
+</g>
+<g >
+<title>VentureSystem (3,134,644 samples, 0.05%)</title><rect x="71.6" y="237" width="0.5" height="15.0" fill="rgb(234,134,32)" rx="2" ry="2" />
+<text  x="74.55" y="247.5" ></text>
+</g>
+<g >
+<title>SnapshotsSystem (1,462,742 samples, 0.02%)</title><rect x="71.3" y="237" width="0.3" height="15.0" fill="rgb(226,96,23)" rx="2" ry="2" />
+<text  x="74.30" y="247.5" ></text>
+</g>
+<g >
+<title>__printf_buffer (21,564,821 samples, 0.31%)</title><rect x="11.4" y="173" width="3.6" height="15.0" fill="rgb(219,68,16)" rx="2" ry="2" />
+<text  x="14.36" y="183.5" ></text>
+</g>
+<g >
+<title>flecs_remove_invalid (2,460,710 samples, 0.04%)</title><rect x="66.4" y="173" width="0.4" height="15.0" fill="rgb(220,70,16)" rx="2" ry="2" />
+<text  x="69.37" y="183.5" ></text>
+</g>
+<g >
+<title>flecs_find_table_with (717,640 samples, 0.01%)</title><rect x="68.9" y="237" width="0.1" height="15.0" fill="rgb(209,22,5)" rx="2" ry="2" />
+<text  x="71.90" y="247.5" ></text>
+</g>
+</g>
+</svg>

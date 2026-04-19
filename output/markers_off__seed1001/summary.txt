@@ -1,0 +1,52 @@
+=== simulation summary ===
+ticks_run             29999
+final_population      64
+peak_population       65
+total_births          639
+total_deaths          575
+final_relationships   2094
+ventures_attempted    561610
+ventures_succeeded    252435
+ventures_failed       309175
+success_rate          0.4495
+
+=== config echo ===
+seed                     1001
+max_ticks                30000
+initial_population       40
+initial_resources_min    50.0000
+initial_resources_max    150.0000
+metabolism               1.0000
+venture_cost             3.0000
+venture_reward           8.0000
+base_success_prob        0.3000
+trust_success_weight     0.5000
+trust_gain_on_success    0.1500
+trust_loss_on_failure    0.1000
+trust_decay              0.002000
+trust_baseline           0.0000
+exploration_rate         0.1000
+venture_chance           0.4000
+spawn_interval           50
+snapshot_interval        2000
+
+=== extension knobs ===
+coop_quality_mean              0.5000
+coop_quality_sigma             0.0000
+coop_quality_success_weight    0.0000
+coop_quality_payoff_scale      0.0000
+trait_quality_correlation      0.0000
+trait_generalization_strength  0.0000
+search_base_k                  0
+search_min_k                   1
+search_max_k                   1024
+search_slope                   0.0000
+search_wealth_threshold        0.0000
+search_cost_per_candidate      0.0000
+initial_resource_rich_frac     0.0000
+initial_resources_rich_min     0.0000
+initial_resources_rich_max     0.0000
+intervention_tick              -1
+intervention_exploration_rate  0.0000
+intervention_generalization    -1.0000
+intervention_newentrant_boost  1.0000
