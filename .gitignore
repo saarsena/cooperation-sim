@@ -1,8 +1,15 @@
 # Build directories
 build/
+build-rel/
 cmake-build-*/
 out/
 .cache/
+
+# Simulation outputs
+output/
+
+# Jupyter scratch
+.ipynb_checkpoints/
 # IDE files
 .idea/
 .vscode/
