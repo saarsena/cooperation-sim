@@ -6,9 +6,10 @@
 #include <stdint.h>
 
 /* Rule 2: visible discrete-valued traits, fixed per agent for life.
-   3 traits × 4 levels = 64 distinct visible "types". */
-#define TRAIT_COUNT  3
-#define TRAIT_LEVELS 4
+   2 traits × 2 levels = 4 distinct visible "types" — populous enough at
+   default pop sizes that within-group buckets aren't starved. */
+#define TRAIT_COUNT  2
+#define TRAIT_LEVELS 2
 
 typedef struct Resources       { float amount; }   Resources;
 typedef struct TrustBaseline   { float value;  }   TrustBaseline;
@@ -56,6 +57,6 @@ static inline int traits_group_key(const Traits *t) {
     return k;
 }
 
-#define TRAITS_GROUP_COUNT 64 /* TRAIT_LEVELS ^ TRAIT_COUNT */
+#define TRAITS_GROUP_COUNT 4 /* TRAIT_LEVELS ^ TRAIT_COUNT */
 
 #endif

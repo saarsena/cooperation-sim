@@ -25,7 +25,7 @@ int per_tick_metrics_open(const char *path) {
     g_fp = fopen(path, "w");
     if (!g_fp) return -1;
     fprintf(g_fp,
-        "tick,population,mean_trust,strong_edges,resources_gini,total_resources,"
+        "tick,population,mean_trust,strong_edges,total_edges,resources_gini,total_resources,"
         "within_group_trust,across_group_trust,trust_gap,"
         "gini_group_mean,mean_search_effort_q1,mean_search_effort_q4\n");
     return 0;
@@ -191,8 +191,8 @@ static void PerTickMetricsSystem(ecs_iter_t *it) {
 
     float g = gini(g_res_buf, pop);
 
-    fprintf(g_fp, "%d,%d,%.6f,%d,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.4f,%.4f\n",
-            tick, pop, mean_trust, strong, g, total_res,
+    fprintf(g_fp, "%d,%d,%.6f,%d,%d,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.4f,%.4f\n",
+            tick, pop, mean_trust, strong, edges, g, total_res,
             within_trust, across_trust, trust_gap,
             gini_group_mean, q1_effort, q4_effort);
 
