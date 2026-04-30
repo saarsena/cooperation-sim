@@ -1,20 +1,15 @@
-# loading output/witness_v0/events.log
-# 586,068 events
-# 200 agents seen across snapshots
-# selected agent 8589935359
 
-Xenet, the bright-eyed, was born in year 2, day 120 with 76 measures of food set aside.
+Xenet, goldies, was born in year 2, day 120 with 76 measures of food set aside.
 
 Early life:
-  In year 2 day 121, Xenet first met Zellor, the smooth-skinned. The bond was new and uncertain (trust +1.00).
-  Year 2, day 121: Xenet and Zellor ventured together and it went well. Trust between them stood at +1.00.
-  In year 2 day 121, Xenet first met Teldor, the dappled. The bond was new and uncertain (trust -0.12).
-  Year 2, day 121: Xenet and Teldor tried something and it failed them. Trust slipped to -0.12.
-  In year 2 day 123, Xenet first met Varet, the smooth-skinned. The bond was new and uncertain (trust +0.77).
-  Year 2, day 123: Xenet and Varet tried something and it failed them. Trust slipped to +0.77.
+  In year 2 day 121, Xenet's first encounter with the fat bottoms — Zellor — their first venture went well; trust set to +1.00.
+  In year 2 day 121, Xenet's first encounter with east coast — Teldor — their first venture failed; trust set to -0.12.
+  In year 2 day 137, Xenet's first encounter with west coast — Telis — their first venture went well; trust set to +0.16.
+  In year 2 day 145, Xenet's first encounter with goldies — Pellish — their first venture failed; trust set to -1.00.
 
 Across the years, Xenet attempted 1945 ventures with others. Of these, 821 succeeded (42%) and 1124 failed.
 They formed 72 relationships and watched 72 of those bonds end (most because the other person died, some because trust drifted to nothing).
+By year 7, Xenet had grown close to Yorel (the fat bottoms); they ventured together 187 times, and only 20 of those went badly.
 
 Later life:
   Year 11, day 90: Xenet and Elian tried something and it failed them. Trust slipped to -0.40.
@@ -29,7 +24,7 @@ Later life:
 
 How the world treated them, by trait of partner:
   • with of an unknown kind: 1/3 ventures succeeded (33%).
-  • with the smooth-skinned: 610/1013 ventures succeeded (60%).
-  • with the dappled: 82/401 ventures succeeded (20%).
-  • with the marked: 93/366 ventures succeeded (25%).
-  • with the bright-eyed (same kind as them): 35/162 ventures succeeded (22%).
+  • with the fat bottoms: 610/1013 ventures succeeded (60%).
+  • with east coast: 82/401 ventures succeeded (20%).
+  • with west coast: 93/366 ventures succeeded (25%).
+  • with goldies (same kind as them): 35/162 ventures succeeded (22%).

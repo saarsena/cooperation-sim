@@ -5,16 +5,17 @@ agent snapshot, picks one agent with a "complete" arc, generates a
 procedural name, and writes a past-tense narrative timeline of their life.
 
 Usage:
-  python3 analysis/witness_v0.py [run_dir]
+  python3 analysis/witness_v0.py [run_dir]              # render one to stdout
+  python3 analysis/witness_v0.py --all [run_dir]        # render every qualifying
+                                                          agent to <run_dir>/lives/
 
 Default run_dir = output/witness_v0.
 """
-import sys
 import csv
 import hashlib
-from pathlib import Path
+import sys
 from collections import defaultdict
-
+from pathlib import Path
 
 # ---- procedural name pools ---------------------------------------------------
 # Picked by hashing the agent ID. Deterministic; same agent ID always yields
@@ -22,7 +23,7 @@ from collections import defaultdict
 # uniqueness for one run's worth of agents (≤ ~700).
 
 GIVEN_PARTS = [
-    "Mar", "Tel", "Ash", "Pell", "Bren", "Cor", "Dav", "Eli",
+    "Sel", "Tel", "Ash", "Pell", "Bren", "Cor", "Dav", "Eli",
     "Fen", "Gar", "Hess", "Iv", "Jor", "Kel", "Lir", "Mern",
     "Nor", "Or", "Pyl", "Quel", "Rin", "Saf", "Tam", "Ul",
     "Var", "Wes", "Xen", "Yor", "Zell", "An",
@@ -49,10 +50,10 @@ def name_from_id(agent_id: int) -> str:
 # the trait names should not have inherent value loading.
 
 TRAIT_LABELS = {
-    0: "the smooth-skinned",
-    1: "the dappled",
-    2: "the marked",
-    3: "the bright-eyed",
+    0: "the fat bottoms",
+    1: "east coast",
+    2: "west coast",
+    3: "goldies",
 }
 
 
@@ -164,22 +165,30 @@ def index_lives(events):
     return lives
 
 
-def select_subject(lives, max_tick, traits):
-    """Pick an agent with a complete and reasonably full life."""
-    candidates = []
+def qualifying_agents(lives, traits,
+                      min_lifespan=1500, min_ventures=30, min_relationships=4):
+    """Return list of (aid, life, lifespan) tuples for every agent with a
+    complete and reasonably full life arc."""
+    out = []
     for aid, life in lives.items():
         if life["birth"] is None or life["death"] is None:
             continue
         lifespan = life["death"] - life["birth"]
-        if lifespan < 1500:
+        if lifespan < min_lifespan:
             continue
-        if life["ventures"] < 30:
+        if life["ventures"] < min_ventures:
             continue
-        if life["relationships_formed"] < 4:
+        if life["relationships_formed"] < min_relationships:
             continue
         if aid not in traits:
             continue
-        candidates.append((aid, life, lifespan))
+        out.append((aid, life, lifespan))
+    return out
+
+
+def select_subject(lives, max_tick, traits):
+    """Pick an agent with a complete and reasonably full life."""
+    candidates = qualifying_agents(lives, traits)
 
     if not candidates:
         return None
@@ -278,12 +287,47 @@ def render_life(events, subject, traits, lives):
             return (f"In year {y} day {d}, {name} died.")
         return f"({e['tick']}: {e['kind']})"
 
-    # opening events
+    # opening events: first encounter with each trait group, in order met.
+    # This mirrors the per-trait coda — the reader is introduced to each
+    # group at the start, then sees how the relationships across those groups
+    # turned out at the end. Falls back to plain first-N if traits are
+    # unknown for too many early partners.
+    early_intros = []
+    seen_traits = set()
+    for e in relevant:
+        if e["kind"] != "relationship_created":
+            continue
+        other = e["b"] if e["a"] == subject else e["a"]
+        if other == 0:
+            continue
+        ptrait = traits.get(other, -1)
+        if ptrait in seen_traits:
+            continue
+        seen_traits.add(ptrait)
+        early_intros.append((e, other, ptrait))
+        if len(seen_traits) >= len(TRAIT_LABELS):
+            break
+
     if relevant:
         out.append("")
         out.append("Early life:")
-        for e in relevant[:cap_early]:
-            out.append("  " + render_event(e, "early"))
+        if len(early_intros) >= 2:
+            for e, other, ptrait in early_intros:
+                y, d = years(e["tick"])
+                pname = name_from_id(other)
+                plabel = TRAIT_LABELS.get(ptrait, "of an unfamiliar kind")
+                trust = e["value"]
+                if trust >= 0:
+                    outcome = "their first venture went well"
+                else:
+                    outcome = "their first venture failed"
+                out.append(f"  In year {y} day {d}, {name}'s first encounter "
+                           f"with {plabel} — {pname} — {outcome}; "
+                           f"trust set to {trust:+.2f}.")
+        else:
+            # not enough trait info for the structured intro — fall back
+            for e in relevant[:cap_early]:
+                out.append("  " + render_event(e, "early"))
 
     # midlife summary
     if life["ventures"] > 0:
@@ -297,6 +341,46 @@ def render_life(events, subject, traits, lives):
                    f"and watched {life['relationships_lost']} of those bonds "
                    f"end (most because the other person died, some because "
                    f"trust drifted to nothing).")
+
+    # midlife bridge: name the partner the subject ventured with most often
+    # and give the reader one specific human-scale fact about the middle of
+    # the life. Skips when no clear standout (≥ 20 ventures with one partner).
+    pair_counts = defaultdict(lambda: {"win": 0, "loss": 0,
+                                       "first": None, "last": None})
+    for e in relevant:
+        if e["kind"] not in ("venture_success", "venture_failure"):
+            continue
+        other = e["b"] if e["a"] == subject else e["a"]
+        if other == 0:
+            continue
+        c = pair_counts[other]
+        if e["kind"] == "venture_success":
+            c["win"] += 1
+        else:
+            c["loss"] += 1
+        if c["first"] is None:
+            c["first"] = e["tick"]
+        c["last"] = e["tick"]
+
+    if pair_counts:
+        partner, c = max(pair_counts.items(),
+                         key=lambda kv: (kv[1]["win"] + kv[1]["loss"], kv[0]))
+        total = c["win"] + c["loss"]
+        if total >= 20:
+            mid_y, _ = years((c["first"] + c["last"]) // 2)
+            pname = name_from_id(partner)
+            plabel = TRAIT_LABELS.get(traits.get(partner, -1),
+                                      "of an unfamiliar kind")
+            if c["win"] > c["loss"]:
+                out.append(
+                    f"By year {mid_y}, {name} had grown close to {pname} "
+                    f"({plabel}); they ventured together {total} times, and "
+                    f"only {c['loss']} of those went badly.")
+            else:
+                out.append(
+                    f"By year {mid_y}, {name} and {pname} ({plabel}) had "
+                    f"settled into a wary kind of partnership; of {total} "
+                    f"ventures together, only {c['win']} went well.")
 
     # closing events. We want the death event to land prominently — but it
     # often shares a tick with a cascade of relationship_destroyed events,
@@ -366,8 +450,28 @@ def render_life(events, subject, traits, lives):
 
 # ---- main --------------------------------------------------------------------
 
+def render_all(events, traits, lives, out_dir: Path):
+    """Render every qualifying agent's life to a separate text file in
+    out_dir/<name>_<id>.txt. Returns count written."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    written = 0
+    for aid, _life, _ls in sorted(qualifying_agents(lives, traits),
+                                  key=lambda c: c[0]):
+        text = render_life(events, aid, traits, lives)
+        name = name_from_id(aid)
+        path = out_dir / f"{name}_{aid}.txt"
+        path.write_text(text + "\n")
+        written += 1
+    return written
+
+
 def main():
-    run_dir = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("output/witness_v0")
+    args = sys.argv[1:]
+    all_mode = False
+    if args and args[0] == "--all":
+        all_mode = True
+        args = args[1:]
+    run_dir = Path(args[0]) if args else Path("output/witness_v0")
     if not run_dir.exists():
         sys.exit(f"no run dir at {run_dir} — run scenarios/witness_v0.conf first")
 
@@ -384,6 +488,12 @@ def main():
 
     lives = index_lives(events)
     max_tick = max(e["tick"] for e in events)
+
+    if all_mode:
+        out_dir = run_dir / "lives"
+        n = render_all(events, traits, lives, out_dir)
+        print(f"# wrote {n} narratives to {out_dir}")
+        return
 
     subject = select_subject(lives, max_tick, traits)
     if subject is None:
