@@ -94,6 +94,20 @@ typedef struct Config {
        the two can be ablated separately. Default 2.0 mirrors that constant. */
     float    place_pref_temperature;       /* default 2.0 */
 
+    /* Phase 2.5: exposure-based attachment. Small constant added to every
+       venture's place-preference delta, regardless of outcome. Models the
+       fact that real people accumulate attachment to places where they
+       spent time even when that time was hard — hometowns, workplaces,
+       the bar where everything bad happened. Without this, the loss-
+       averse outcome-only update saturates LocationPrefs at -1 for every
+       place an agent ventures at often (since failures > successes at
+       42% baseline), and biographies report "had come to dread it"
+       almost universally. With a small positive exposure gain layered
+       under the outcome-driven update, long-time residents drift toward
+       the bittersweet middle even as their trial-by-trial outcomes vary.
+       Default 0.0 preserves V1-V3 behavior; witness scenarios opt in. */
+    float    place_pref_exposure_gain;     /* default 0.0 */
+
     /* --- Witness-world: world_events module (Phase 2). Touchstone events
        broadcast to multiple agents at once: fires at a place, notable deaths.
        Determinism preserved within witness-world via an isolated PCG sub-

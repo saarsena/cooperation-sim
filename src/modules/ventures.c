@@ -333,9 +333,15 @@ static void VentureSystem(ecs_iter_t *it) {
         if (eff.places_enabled) {
             place_id = places_choose_for_venture(it->world, self, partner,
                                                  eff.exploration_rate);
-            float dpref = success
+            /* Phase 2.5: exposure-based attachment. The outcome-driven
+               update is layered on top of a small constant gain that
+               accumulates regardless of whether the venture succeeded —
+               attachment from time spent, not just from whether time
+               spent went well. Default 0.0 preserves V1-V3 behavior. */
+            float dpref = (success
                 ?  eff.place_pref_gain_on_success
-                : -eff.place_pref_loss_on_failure;
+                : -eff.place_pref_loss_on_failure)
+                + eff.place_pref_exposure_gain;
             places_update_pref_on_outcome(it->world, self,    place_id, dpref);
             places_update_pref_on_outcome(it->world, partner, place_id, dpref);
             /* Phase 2: per-agent venture history (used to find the deceased's

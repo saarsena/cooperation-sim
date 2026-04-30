@@ -69,6 +69,7 @@ Config config_load(const char *path) {
     cfg.place_pref_loss_on_failure    = 0.07f;
     cfg.place_pref_decay              = 0.001f;
     cfg.place_pref_temperature        = 2.0f;
+    cfg.place_pref_exposure_gain      = 0.0f;
 
     /* Witness-world Phase 2 defaults. */
     cfg.world_events_enabled            = 0;
@@ -135,6 +136,7 @@ Config config_load(const char *path) {
         { "place_pref_loss_on_failure",    T_FLOAT, OFF(place_pref_loss_on_failure),    0, OPT, 0 },
         { "place_pref_decay",              T_FLOAT, OFF(place_pref_decay),              0, OPT, 0 },
         { "place_pref_temperature",        T_FLOAT, OFF(place_pref_temperature),        0, OPT, 0 },
+        { "place_pref_exposure_gain",      T_FLOAT, OFF(place_pref_exposure_gain),      0, OPT, 0 },
 
         /* Phase 2: world_events module. */
         { "world_events_enabled",            T_INT,   OFF(world_events_enabled),            0, OPT, 0 },
