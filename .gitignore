@@ -5,14 +5,17 @@ cmake-build-*/
 out/
 .cache/
 
-# Simulation outputs
-output/
+# Simulation outputs (root-anchored — `output/` alone would also match
+# src/output/ because gitignore patterns are unanchored by default).
+/output/
 
 # Jupyter scratch
 .ipynb_checkpoints/
 # IDE files
 .idea/
 .vscode/
+*.sublime-project
+*.sublime-workspace
 *.swp
 *.swo
 *~
@@ -25,6 +28,16 @@ output/
 *.app
 *.csv
 *.data
+__pycache__/
+
+# Local Claude config (settings, permission allow-lists)
+.claude/
+
+# Personal scratch files (per-session ad-hoc artifacts)
+analysis/analysis.pdf
+capacity-pivot-prompt.md
+scenarios/Untitled.ipynb
+scenarios/explore.ipynb
 # CMake generated
 CMakeCache.txt
 CMakeFiles/
