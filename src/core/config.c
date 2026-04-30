@@ -58,6 +58,30 @@ Config config_load(const char *path) {
     cfg.intervention_exploration_rate = 0.0f;
     cfg.intervention_generalization   = -1.0f;
     cfg.intervention_newentrant_boost = 1.0f;
+    cfg.snapshot_at_tick_zero         = 0;
+
+    /* Witness-world places knobs. Default places_enabled=0 so legacy scenarios
+       behave as if the module did not exist. */
+    cfg.places_enabled                = 0;
+    cfg.place_inherit_window          = 0;     /* 0 ⇒ resolve to spawn_interval after parse */
+    cfg.place_inherit_strength        = 0.2f;
+    cfg.place_pref_gain_on_success    = 0.05f;
+    cfg.place_pref_loss_on_failure    = 0.07f;
+    cfg.place_pref_decay              = 0.001f;
+    cfg.place_pref_temperature        = 2.0f;
+
+    /* Witness-world Phase 2 defaults. */
+    cfg.world_events_enabled            = 0;
+    cfg.fire_per_tick_prob              = 1.0e-4f;
+    cfg.fire_pref_hit                   = 0.3f;
+    cfg.notable_death_min_strong_bonds  = 3;
+    cfg.notable_death_trust_threshold   = 0.5f;
+    cfg.notable_death_baseline_hit      = 0.05f;
+
+    /* Phase 3 memory defaults. 0.92 is sweep-calibrated; see config.h. */
+    cfg.memory_enabled                  = 0;
+    cfg.story_inherit_decay             = 0.92f;
+    cfg.story_min_fidelity              = 0.10f;
 
     Slot slots[] = {
         { "seed",                   T_U64,   OFF(seed),                   0,   REQ, 0 },
@@ -101,6 +125,29 @@ Config config_load(const char *path) {
         { "intervention_exploration_rate", T_FLOAT, OFF(intervention_exploration_rate), 0, OPT, 0 },
         { "intervention_generalization",   T_FLOAT, OFF(intervention_generalization),   0, OPT, 0 },
         { "intervention_newentrant_boost", T_FLOAT, OFF(intervention_newentrant_boost), 0, OPT, 0 },
+        { "snapshot_at_tick_zero",         T_INT,   OFF(snapshot_at_tick_zero),         0, OPT, 0 },
+
+        /* Witness-world: places module. */
+        { "places_enabled",                T_INT,   OFF(places_enabled),                0, OPT, 0 },
+        { "place_inherit_window",          T_INT,   OFF(place_inherit_window),          0, OPT, 0 },
+        { "place_inherit_strength",        T_FLOAT, OFF(place_inherit_strength),        0, OPT, 0 },
+        { "place_pref_gain_on_success",    T_FLOAT, OFF(place_pref_gain_on_success),    0, OPT, 0 },
+        { "place_pref_loss_on_failure",    T_FLOAT, OFF(place_pref_loss_on_failure),    0, OPT, 0 },
+        { "place_pref_decay",              T_FLOAT, OFF(place_pref_decay),              0, OPT, 0 },
+        { "place_pref_temperature",        T_FLOAT, OFF(place_pref_temperature),        0, OPT, 0 },
+
+        /* Phase 2: world_events module. */
+        { "world_events_enabled",            T_INT,   OFF(world_events_enabled),            0, OPT, 0 },
+        { "fire_per_tick_prob",              T_FLOAT, OFF(fire_per_tick_prob),              0, OPT, 0 },
+        { "fire_pref_hit",                   T_FLOAT, OFF(fire_pref_hit),                   0, OPT, 0 },
+        { "notable_death_min_strong_bonds",  T_INT,   OFF(notable_death_min_strong_bonds),  0, OPT, 0 },
+        { "notable_death_trust_threshold",   T_FLOAT, OFF(notable_death_trust_threshold),   0, OPT, 0 },
+        { "notable_death_baseline_hit",      T_FLOAT, OFF(notable_death_baseline_hit),      0, OPT, 0 },
+
+        /* Phase 3: memory module. */
+        { "memory_enabled",                  T_INT,   OFF(memory_enabled),                  0, OPT, 0 },
+        { "story_inherit_decay",             T_FLOAT, OFF(story_inherit_decay),             0, OPT, 0 },
+        { "story_min_fidelity",              T_FLOAT, OFF(story_min_fidelity),              0, OPT, 0 },
     };
     const int nslots = (int)(sizeof slots / sizeof slots[0]);
 
@@ -187,6 +234,14 @@ Config config_load(const char *path) {
             cfg.initial_resources_rich_min = cfg.initial_resources_min;
         if (cfg.initial_resources_rich_max <= 0.0f)
             cfg.initial_resources_rich_max = cfg.initial_resources_max;
+    }
+
+    /* Witness-world: a value of 0 for place_inherit_window means "use the
+       spawn interval as the lookback window." Only meaningful when
+       places_enabled=1, but normalized regardless so consumers can read the
+       resolved value directly. */
+    if (cfg.place_inherit_window <= 0) {
+        cfg.place_inherit_window = cfg.spawn_interval;
     }
 
     if (cfg.initial_resources_min > cfg.initial_resources_max)

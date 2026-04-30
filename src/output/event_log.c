@@ -10,7 +10,7 @@ int event_log_open(const char *path, int enabled) {
     if (!enabled) return 0;
     g_fp = fopen(path, "w");
     if (!g_fp) return -1;
-    fprintf(g_fp, "tick\tkind\tagent_a\tagent_b\tvalue\n");
+    fprintf(g_fp, "tick\tkind\tagent_a\tagent_b\tvalue\tplace_id\n");
     return 0;
 }
 
@@ -22,10 +22,11 @@ void event_log_close(void) {
 }
 
 void event_log_write(int tick, const char *kind,
-                     ecs_entity_t a, ecs_entity_t b, float value) {
+                     ecs_entity_t a, ecs_entity_t b, float value,
+                     int place_id) {
     if (!g_enabled || !g_fp) return;
-    fprintf(g_fp, "%d\t%s\t%llu\t%llu\t%.6f\n",
+    fprintf(g_fp, "%d\t%s\t%llu\t%llu\t%.6f\t%d\n",
             tick, kind,
             (unsigned long long)a, (unsigned long long)b,
-            (double)value);
+            (double)value, place_id);
 }

@@ -119,7 +119,7 @@ ecs_entity_t create_relationship(ecs_world_t *world,
     hmput(g_index, key, r);
     g_formation_count++;
 
-    event_log_write(current_tick, "relationship_created", a, b, initial_strength);
+    event_log_write(current_tick, "relationship_created", a, b, initial_strength, -1);
     return r;
 }
 
@@ -142,7 +142,7 @@ void relationships_destroy_for_agent(ecs_world_t *world, ecs_entity_t agent, int
                 PairKey key = make_key(pairs[i].a, pairs[i].b);
                 (void)hmdel(g_index, key);
                 event_log_write(current_tick, "relationship_destroyed",
-                                pairs[i].a, pairs[i].b, 0.0f);
+                                pairs[i].a, pairs[i].b, 0.0f, -1);
                 ecs_delete(world, it.entities[i]);
             }
         }
@@ -161,4 +161,29 @@ long relationships_consume_formation_count(void) {
     long c = g_formation_count;
     g_formation_count = 0;
     return c;
+}
+
+int relationships_collect_strong_partners(
+    ecs_world_t *world, ecs_entity_t agent, float min_trust,
+    ecs_entity_t *partners, float *trusts, int max_out)
+{
+    int n = 0;
+    ecs_iter_t it = ecs_query_iter(world, q_all_relationships);
+    while (ecs_query_next(&it)) {
+        RelationshipPair *pairs = ecs_field(&it, RelationshipPair, 0);
+        for (int i = 0; i < it.count; i++) {
+            ecs_entity_t partner = 0;
+            if (pairs[i].a == agent)      partner = pairs[i].b;
+            else if (pairs[i].b == agent) partner = pairs[i].a;
+            else continue;
+            const TrustStrength *ts = ecs_get(world, it.entities[i], TrustStrength);
+            if (!ts) continue;
+            if (ts->value < min_trust) continue;
+            if (n >= max_out) return n;
+            partners[n] = partner;
+            trusts[n]   = ts->value;
+            n++;
+        }
+    }
+    return n;
 }

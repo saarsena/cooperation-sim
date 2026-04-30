@@ -2,7 +2,10 @@
 
 #include "core/rng.h"
 #include "core/world.h"
+#include "modules/memory.h"
+#include "modules/places.h"
 #include "modules/relationships.h"
+#include "modules/world_events.h"
 #include "output/event_log.h"
 
 #include <math.h>
@@ -16,6 +19,8 @@ ECS_COMPONENT_DECLARE(VentureChance);
 ECS_COMPONENT_DECLARE(Traits);
 ECS_COMPONENT_DECLARE(CoopQuality);
 ECS_COMPONENT_DECLARE(TrustByTrait);
+ECS_COMPONENT_DECLARE(LastActive);
+ECS_COMPONENT_DECLARE(SocialAncestor);
 ECS_TAG_DECLARE(Alive);
 
 /* Box–Muller normal sample using the project RNG — kept here (not rng.c) because
@@ -68,8 +73,13 @@ static void AgentDeathSystem(ecs_iter_t *it) {
         }
     }
 
+    const Config *cfg = world_cfg(it->world);
     for (int i = 0; i < n; i++) {
-        event_log_write(tick, "agent_death", dying[i], 0, 0.0f);
+        event_log_write(tick, "agent_death", dying[i], 0, 0.0f, -1);
+        /* Phase 2: notable-death broadcast must happen BEFORE the
+           relationships are destroyed (we need to enumerate strong bonds).
+           No-op when world_events_enabled=0. */
+        world_events_handle_death(it->world, cfg, dying[i], tick);
         relationships_destroy_for_agent(it->world, dying[i], tick);
         ecs_delete(it->world, dying[i]);
         st->deaths++;
@@ -94,6 +104,8 @@ void AgentsModuleImport(ecs_world_t *world) {
     ECS_COMPONENT_DEFINE(world, Traits);
     ECS_COMPONENT_DEFINE(world, CoopQuality);
     ECS_COMPONENT_DEFINE(world, TrustByTrait);
+    ECS_COMPONENT_DEFINE(world, LastActive);
+    ECS_COMPONENT_DEFINE(world, SocialAncestor);
     ECS_TAG_DEFINE(world, Alive);
 
     AgentPrefab = ecs_entity(world, {
@@ -196,10 +208,47 @@ ecs_entity_t spawn_agent(ecs_world_t *world, const Config *cfg) {
     ecs_set_ptr(world, e, Traits, &traits);
     ecs_set(world, e, CoopQuality, { q });
     ecs_set_ptr(world, e, TrustByTrait, &tbt);
+    /* Initial LastActive = birth tick. They count as "recent" for the next
+       place_inherit_window ticks even before they've ventured, which is
+       the right behavior — a freshly-spawned agent who just hasn't had a
+       chance to act yet should still be part of the cohort that newer
+       arrivals inherit from. */
+    ecs_set(world, e, LastActive,    { st->current_tick });
+
+    /* Witness-world: inherit a weak prior over locations from currently-living
+       agents who have ventured (or been spawned) within the recency window.
+       The new agent is added to the live cohort *after* this read, so they
+       can't sample themselves. With no living agents (initial population
+       seed at tick 0), prior is zero.
+
+       DO NOT MOVE the `ecs_add(Alive)` below this block. The inherited-prior
+       query reads agents tagged Alive; if the new agent is tagged before the
+       prior is computed, they self-include with all-zero weights, biasing
+       every new spawn's prior toward zero. Ordering is load-bearing. */
+    ecs_entity_t ancestor = 0;
+    if (cfg->places_enabled) {
+        LocationPrefs lp;
+        ancestor = places_compute_inherited_prior(world, cfg, &lp);
+        ecs_set_ptr(world, e, LocationPrefs, &lp);
+    }
+    /* Record the picked ancestor (or 0 for the initial population) so the
+       biography renderer can attribute inheritance to a specific
+       predecessor. Set unconditionally so the component is present on
+       every agent. */
+    ecs_set(world, e, SocialAncestor, { ancestor });
+
+    /* Phase 3: inherit the ancestor's stories (decay applied per slot,
+       slots below story_min_fidelity dropped, slot eviction by priority
+       if heir's inventory overflows). No-op when memory_enabled=0 or
+       there's no ancestor. */
+    if (cfg->memory_enabled && ancestor) {
+        memory_inherit_from(world, cfg, e, ancestor);
+    }
+
     ecs_add(world, e, Alive);
 
     st->births++;
 
-    event_log_write(st->current_tick, "agent_birth", e, 0, res);
+    event_log_write(st->current_tick, "agent_birth", e, 0, res, -1);
     return e;
 }

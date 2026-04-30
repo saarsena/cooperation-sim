@@ -15,6 +15,19 @@ typedef struct Resources       { float amount; }   Resources;
 typedef struct TrustBaseline   { float value;  }   TrustBaseline;
 typedef struct Age             { int   ticks;  }   Age;
 typedef struct VentureChance   { float p;      }   VentureChance;
+/* Witness-world: tick of this agent's most recent venture (or, for a
+   freshly-spawned agent, their birth tick). Read by places inheritance to
+   filter the cohort an inheriting spawn averages over: only agents whose
+   current_tick - LastActive < place_inherit_window contribute. Decoupled
+   from Age so that long-lived but currently-inactive agents stop carrying
+   weight in newcomers' priors. */
+typedef struct LastActive      { int   tick;   }   LastActive;
+/* Witness-world Phase 3: the specific recent ancestor whose LocationPrefs
+   (and, when memory_enabled, Stories) were sampled by this agent at spawn.
+   0 for the initial population (no ancestor was alive). Used by the
+   biography renderer to attribute "inherited from Selka" lines to a real
+   predecessor, not just to "the previous generation." */
+typedef struct SocialAncestor  { ecs_entity_t id; } SocialAncestor;
 
 typedef struct Traits {
     uint8_t v[TRAIT_COUNT];
@@ -39,6 +52,8 @@ extern ECS_COMPONENT_DECLARE(VentureChance);
 extern ECS_COMPONENT_DECLARE(Traits);
 extern ECS_COMPONENT_DECLARE(CoopQuality);
 extern ECS_COMPONENT_DECLARE(TrustByTrait);
+extern ECS_COMPONENT_DECLARE(LastActive);
+extern ECS_COMPONENT_DECLARE(SocialAncestor);
 extern ECS_TAG_DECLARE(Alive);
 
 extern ecs_entity_t AgentPrefab;

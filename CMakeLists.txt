@@ -43,8 +43,11 @@ set(SOURCES
     src/core/rng.c
     src/core/world.c
     src/modules/agents.c
+    src/modules/memory.c
+    src/modules/places.c
     src/modules/relationships.c
     src/modules/ventures.c
+    src/modules/world_events.c
     src/output/output.c
     src/output/per_tick_metrics.c
     src/output/snapshots.c

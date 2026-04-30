@@ -37,4 +37,16 @@ void relationships_cleanup(void);
    the last call and resets the internal counter. Used by per-tick metrics. */
 long relationships_consume_formation_count(void);
 
+/* Witness-world Phase 2: collect every partner of `agent` whose pairwise
+   trust is at or above `min_trust`. Writes partner entity IDs into
+   `partners[]` and the corresponding trust values into `trusts[]`, up to
+   `max_out` entries. Returns the count written.
+
+   Used by world_events to enumerate the surviving high-trust friends of a
+   notable-death victim. Must be called BEFORE relationships_destroy_for_agent
+   (otherwise the relationships have already been deleted). */
+int relationships_collect_strong_partners(
+    ecs_world_t *world, ecs_entity_t agent, float min_trust,
+    ecs_entity_t *partners, float *trusts, int max_out);
+
 #endif

@@ -4,6 +4,7 @@
 #include "core/rng.h"
 #include "core/world.h"
 #include "modules/agents.h"
+#include "modules/places.h"
 #include "modules/relationships.h"
 #include "output/event_log.h"
 
@@ -324,8 +325,35 @@ static void VentureSystem(ecs_iter_t *it) {
             ecs_set_ptr(it->world, partner, TrustByTrait, &partner_tbt_w);
         }
 
+        /* Witness-world: pick a place for this venture, log into both agents'
+           location preferences, and stamp the event with the place index. The
+           place draw uses an isolated PCG sub-stream so toggling places does
+           not perturb other modules' trajectories at the same seed. */
+        int place_id = -1;
+        if (eff.places_enabled) {
+            place_id = places_choose_for_venture(it->world, self, partner,
+                                                 eff.exploration_rate);
+            float dpref = success
+                ?  eff.place_pref_gain_on_success
+                : -eff.place_pref_loss_on_failure;
+            places_update_pref_on_outcome(it->world, self,    place_id, dpref);
+            places_update_pref_on_outcome(it->world, partner, place_id, dpref);
+            /* Phase 2: per-agent venture history (used to find the deceased's
+               home place at notable-death time) and world-level totals (used
+               by fire to weight target selection toward popular places). */
+            places_record_venture_for_agent(it->world, self,    place_id);
+            places_record_venture_for_agent(it->world, partner, place_id);
+            places_record_venture_world(place_id);
+        }
+
+        /* Witness-world: bump LastActive for both venturers so the places
+           inheritance scan can filter to the recently-active cohort. Cheap
+           ecs_set on an already-present component (no archetype change). */
+        ecs_set(it->world, self,    LastActive, { tick });
+        ecs_set(it->world, partner, LastActive, { tick });
+
         event_log_write(tick, success ? "venture_success" : "venture_failure",
-                        self, partner, new_trust);
+                        self, partner, new_trust, place_id);
     }
 }
 

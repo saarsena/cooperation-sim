@@ -70,3 +70,21 @@ relationships/
 - Six 16-seed scenarios run: markers_off, markers_only, markers_lossaverse, inequality, new_entrant, low_exploration, high_exploration, easy_success.
 - Findings doc written.
 - No automated tests — the simulation *is* the test, validated by determinism + sanity checks on dynamics.
+
+## Witness-world branch (separate instrument)
+
+The `witness-world` branch is a separate scientific instrument from `main`.
+Its goal is narrative legibility, not statistical findings — see the V1 spec
+for details.
+
+Determinism is preserved within `witness-world` (same seed + same config →
+byte-identical output) but cross-branch reproducibility is explicitly **not**
+preserved. A `markers_lossaverse` run on `witness-world` will not be
+byte-identical to the same run on `main`, even with witness features
+disabled.
+
+Each new module that consumes RNG draws from its own sub-stream derived from
+the master seed and a stable module identifier. This keeps intra-module
+determinism tight and lets modules be developed and toggled independently
+without trajectory entanglement: flipping `world_events` on or off should
+not shift the `places` module's draws at the same seed.
