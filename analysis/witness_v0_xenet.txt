@@ -1,0 +1,35 @@
+# loading output/witness_v0/events.log
+# 586,068 events
+# 200 agents seen across snapshots
+# selected agent 8589935359
+
+Xenet, the bright-eyed, was born in year 2, day 120 with 76 measures of food set aside.
+
+Early life:
+  In year 2 day 121, Xenet first met Zellor, the smooth-skinned. The bond was new and uncertain (trust +1.00).
+  Year 2, day 121: Xenet and Zellor ventured together and it went well. Trust between them stood at +1.00.
+  In year 2 day 121, Xenet first met Teldor, the dappled. The bond was new and uncertain (trust -0.12).
+  Year 2, day 121: Xenet and Teldor tried something and it failed them. Trust slipped to -0.12.
+  In year 2 day 123, Xenet first met Varet, the smooth-skinned. The bond was new and uncertain (trust +0.77).
+  Year 2, day 123: Xenet and Varet tried something and it failed them. Trust slipped to +0.77.
+
+Across the years, Xenet attempted 1945 ventures with others. Of these, 821 succeeded (42%) and 1124 failed.
+They formed 72 relationships and watched 72 of those bonds end (most because the other person died, some because trust drifted to nothing).
+
+Later life:
+  Year 11, day 90: Xenet and Elian tried something and it failed them. Trust slipped to -0.40.
+  Year 11, day 93: Xenet and Telis tried something and it failed them. Trust slipped to -0.65.
+  Year 11, day 94: Xenet and Quelel tried something and it failed them. Trust slipped to -0.54.
+  Year 11, day 96: Xenet and Queluri ventured together and it went well. Trust between them stood at -0.03.
+  Year 11, day 97: Xenet and Yorel ventured together and it went well. Trust between them stood at +0.88.
+  Year 11, day 98: Xenet and Garyn tried something and it failed them. Trust slipped to -0.75.
+  Year 11, day 100: Xenet and Zellom tried something and it failed them. Trust slipped to -0.57.
+  Year 11, day 108: Xenet and Lirek tried something and it failed them. Trust slipped to -0.32.
+  In year 11 day 108, Xenet died. 72 bonds went unwitnessed at the same hour, severed because no one was left on Xenet's side of them.
+
+How the world treated them, by trait of partner:
+  • with of an unknown kind: 1/3 ventures succeeded (33%).
+  • with the smooth-skinned: 610/1013 ventures succeeded (60%).
+  • with the dappled: 82/401 ventures succeeded (20%).
+  • with the marked: 93/366 ventures succeeded (25%).
+  • with the bright-eyed (same kind as them): 35/162 ventures succeeded (22%).
