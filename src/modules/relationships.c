@@ -32,6 +32,8 @@ typedef struct {
 
 static PairEntry *g_index = NULL;
 
+static long g_formation_count = 0;
+
 static inline PairKey make_key(ecs_entity_t a, ecs_entity_t b) {
     PairKey k;
     memset(&k, 0, sizeof k);   /* zero any padding so stb_ds memcmp is well-defined */
@@ -115,6 +117,7 @@ ecs_entity_t create_relationship(ecs_world_t *world,
 
     PairKey key = make_key(a, b);
     hmput(g_index, key, r);
+    g_formation_count++;
 
     event_log_write(current_tick, "relationship_created", a, b, initial_strength);
     return r;
@@ -151,4 +154,11 @@ void relationships_destroy_for_agent(ecs_world_t *world, ecs_entity_t agent, int
 void relationships_cleanup(void) {
     hmfree(g_index);
     g_index = NULL;
+    g_formation_count = 0;
+}
+
+long relationships_consume_formation_count(void) {
+    long c = g_formation_count;
+    g_formation_count = 0;
+    return c;
 }

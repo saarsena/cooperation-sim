@@ -3,6 +3,7 @@
 #include "core/world.h"
 #include "modules/agents.h"
 #include "modules/relationships.h"
+#include "modules/ventures.h"
 
 #include "stb_ds.h"
 
@@ -21,13 +22,22 @@ static int          g_res_cap = 0;
 typedef struct { ecs_entity_t key; int value; } EntGroup;
 static EntGroup *g_ent_group = NULL;
 
+/* relationship_entity → was_strong (last tick's value). Used to detect
+   per-tick crossings of the strong-edge threshold. Persists across ticks;
+   relies on flecs entity-generation bits keeping recycled IDs unique, so
+   stale entries from destroyed relationships are harmless. */
+typedef struct { ecs_entity_t key; int value; } EntStrong;
+static EntStrong *g_prev_strong = NULL;
+
 int per_tick_metrics_open(const char *path) {
     g_fp = fopen(path, "w");
     if (!g_fp) return -1;
     fprintf(g_fp,
         "tick,population,mean_trust,strong_edges,total_edges,resources_gini,total_resources,"
         "within_group_trust,across_group_trust,trust_gap,"
-        "gini_group_mean,mean_search_effort_q1,mean_search_effort_q4\n");
+        "gini_group_mean,mean_search_effort_q1,mean_search_effort_q4,"
+        "edges_formed,edges_crossed_up,edges_crossed_down,"
+        "ventures_total,refreshes_existing,refreshes_strong\n");
     return 0;
 }
 
@@ -41,6 +51,8 @@ void per_tick_metrics_close(void) {
     g_res_cap = 0;
     hmfree(g_ent_group);
     g_ent_group = NULL;
+    hmfree(g_prev_strong);
+    g_prev_strong = NULL;
 }
 
 static int cmp_float(const void *a, const void *b) {
@@ -118,6 +130,8 @@ static void PerTickMetricsSystem(ecs_iter_t *it) {
     int    within = 0;
     int    across = 0;
     int    strong = 0;
+    int    crossed_up   = 0;
+    int    crossed_down = 0;
     const float strong_threshold = 0.5f;
 
     ecs_iter_t rit = ecs_query_iter(world, q_rels);
@@ -128,7 +142,20 @@ static void PerTickMetricsSystem(ecs_iter_t *it) {
             float tv = t[i].value;
             trust_sum += tv;
             edges++;
-            if (tv >= strong_threshold) strong++;
+            int is_strong = (tv >= strong_threshold) ? 1 : 0;
+            if (is_strong) strong++;
+
+            /* Detect threshold crossings against last tick's state. New edges
+               (no prior entry) seed the map without recording a crossing —
+               formation is tracked separately via the formation counter. */
+            ecs_entity_t rel_id = rit.entities[i];
+            ptrdiff_t ip = hmgeti(g_prev_strong, rel_id);
+            if (ip >= 0) {
+                int was_strong = g_prev_strong[ip].value;
+                if (!was_strong && is_strong)      crossed_up++;
+                else if (was_strong && !is_strong) crossed_down++;
+            }
+            hmput(g_prev_strong, rel_id, is_strong);
 
             ptrdiff_t ia = hmgeti(g_ent_group, p[i].a);
             ptrdiff_t ib = hmgeti(g_ent_group, p[i].b);
@@ -140,6 +167,12 @@ static void PerTickMetricsSystem(ecs_iter_t *it) {
             }
         }
     }
+
+    long edges_formed = relationships_consume_formation_count();
+    long ventures_total = 0, refreshes_existing = 0, refreshes_strong = 0;
+    ventures_consume_per_tick_counters(&ventures_total,
+                                       &refreshes_existing,
+                                       &refreshes_strong);
 
     float mean_trust   = (edges > 0) ? (float)(trust_sum / edges) : 0.0f;
     float within_trust = (within > 0) ? (float)(within_sum / within) : 0.0f;
@@ -191,10 +224,12 @@ static void PerTickMetricsSystem(ecs_iter_t *it) {
 
     float g = gini(g_res_buf, pop);
 
-    fprintf(g_fp, "%d,%d,%.6f,%d,%d,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.4f,%.4f\n",
+    fprintf(g_fp, "%d,%d,%.6f,%d,%d,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.4f,%.4f,%ld,%d,%d,%ld,%ld,%ld\n",
             tick, pop, mean_trust, strong, edges, g, total_res,
             within_trust, across_trust, trust_gap,
-            gini_group_mean, q1_effort, q4_effort);
+            gini_group_mean, q1_effort, q4_effort,
+            edges_formed, crossed_up, crossed_down,
+            ventures_total, refreshes_existing, refreshes_strong);
 
     if (pop > st->peak_population) st->peak_population = pop;
 }

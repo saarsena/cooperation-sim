@@ -33,4 +33,8 @@ void relationships_destroy_for_agent(ecs_world_t *world, ecs_entity_t agent, int
 /* Release the pair-key hash map. Call once before ecs_fini. */
 void relationships_cleanup(void);
 
+/* Per-tick formation flow: returns the number of relationships created since
+   the last call and resets the internal counter. Used by per-tick metrics. */
+long relationships_consume_formation_count(void);
+
 #endif

@@ -14,6 +14,19 @@
 
 static ecs_query_t *q_alive = NULL;
 
+static long g_ventures_total_tick       = 0;
+static long g_ventures_on_existing_tick = 0;
+static long g_ventures_on_strong_tick   = 0;
+
+void ventures_consume_per_tick_counters(long *total, long *on_existing, long *on_strong) {
+    if (total)       *total       = g_ventures_total_tick;
+    if (on_existing) *on_existing = g_ventures_on_existing_tick;
+    if (on_strong)   *on_strong   = g_ventures_on_strong_tick;
+    g_ventures_total_tick       = 0;
+    g_ventures_on_existing_tick = 0;
+    g_ventures_on_strong_tick   = 0;
+}
+
 static inline float clampf(float x, float lo, float hi) {
     if (x < lo) return lo;
     if (x > hi) return hi;
@@ -252,6 +265,15 @@ static void VentureSystem(ecs_iter_t *it) {
 
         int success = (rng_float() < p_success) ? 1 : 0;
         st->ventures_attempted++;
+
+        /* Per-tick flow counters: every completed venture, split by whether it
+           touched an existing pair and whether that pair was already strong.
+           `trust` here is still the BEFORE-update value. */
+        g_ventures_total_tick++;
+        if (rel) {
+            g_ventures_on_existing_tick++;
+            if (trust >= 0.5f) g_ventures_on_strong_tick++;
+        }
 
         float dres, dtrust;
         if (success) {
